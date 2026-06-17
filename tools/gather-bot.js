@@ -11,9 +11,10 @@ const { Presence } = require('../lib/presenceWs');
 const { KintaraClient } = require('../lib/kintaraClient');
 const { login } = require('../lib/walletAuth');
 const gs = require('../lib/gameState');
+const { config } = require('../config');
 
 const KIND = process.argv[2] || 'tree';
-const SHARD = process.argv[3] || 's2';
+const SHARD = process.argv[3] || config.shard;
 const OUT = path.join(__dirname, '..', 'recon');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'gather.log'), s + '\n'); };
 const lt = {}; const logT = (k, m, ms = 30000) => { const n = Date.now(); if (!lt[k] || n - lt[k] > ms) { lt[k] = n; log(m); } };

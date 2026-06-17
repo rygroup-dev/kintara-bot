@@ -10,8 +10,9 @@ const path = require('path');
 const { Presence } = require('../lib/presenceWs');
 const { KintaraClient } = require('../lib/kintaraClient');
 const { login } = require('../lib/walletAuth');
+const { config } = require('../config');
 
-const SHARD = process.argv[2] || 's2';
+const SHARD = process.argv[2] || config.shard;
 const OUT = path.join(__dirname, '..', 'recon');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'bot.log'), s + '\n'); };
 const _thr = {};

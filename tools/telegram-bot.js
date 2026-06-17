@@ -11,6 +11,7 @@ const cp = require('child_process');
 const tg = require('../lib/telegram');
 const { KintaraClient } = require('../lib/kintaraClient');
 const { login } = require('../lib/walletAuth');
+const { config } = require('../config');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'recon');
@@ -73,7 +74,7 @@ async function hQuest() {
 function hStartFish() {
   if (gatherPid()) return '⚠️ Gather bot is ON — run /stop first (1 account = 1 activity).';
   if (botPid()) return '🎣 Fishing bot is already ON.';
-  const pid = spawnBot('bot-headless.js', ['s2'], PIDFILE);
+  const pid = spawnBot('bot-headless.js', [config.shard], PIDFILE);
   return `🎣 Fishing bot START (pid ${pid}). Queues for ~10min, then grinds+cooks. Check /status.`;
 }
 function hStartGather(args) {
@@ -83,7 +84,7 @@ function hStartGather(args) {
   const running = gatherPid(); const cur = readJson(GPIDFILE);
   if (running && cur?.kind === kind) return `${lbl} is already ON.`;
   if (running) { try { process.kill(running, 'SIGKILL'); } catch {} try { fs.unlinkSync(GPIDFILE); } catch {} } // switch kind
-  const pid = spawnBot('gather-bot.js', [kind, 's2'], GPIDFILE);
+  const pid = spawnBot('gather-bot.js', [kind, config.shard], GPIDFILE);
   fs.writeFileSync(GPIDFILE, JSON.stringify({ pid, kind, started: Date.now() })); // save kind
   return `${lbl} START (pid ${pid})${running ? ' [switched from ' + (cur?.kind || '?') + ']' : ''}. Queues for ~10min. Check /status.`;
 }
@@ -132,7 +133,6 @@ const MENU = [
 ];
 async function syncMenu() {
   try {
-    const { config } = require('../config');
     await fetch(`https://api.telegram.org/bot${config.telegramToken}/setMyCommands`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commands: MENU }),
     });
