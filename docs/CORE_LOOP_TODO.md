@@ -1,96 +1,79 @@
-# CORE_LOOP_TODO.md
+# Core Loop TODO
 
-## Yang sudah confirmed (`kintara-api.md`)
-- Auth/player state (`/api/auth/me`, player-stats)
-- Backpack/inventory save
-- Marketplace (listings, stats, token quote/buy)
-- Daily quest progress/claim
-- Casino (spinner free/paid, blackjack, roulette)
-- World tribute & merchant campaign
-- Bank unlock-page
-- Friends/DM
-- Token & server info
+## Confirmed API areas
 
-## Yang BELUM confirmed — perlu HAR capture baru
+- Auth and player state (`/api/auth/me`, player stats)
+- Backpack/inventory save flow
+- Marketplace listing reads, stats, token quote/buy, sell/cancel helpers
+- Daily quest progress and claim
+- Casino spinner endpoints
+- World tribute and merchant campaign
+- Bank unlock-page endpoint
+- Friends and DM endpoints
+- Token and server info endpoints
 
-### 1. Login / Auth Flow (paling penting)
-Cara capture:
-1. Buka DevTools → tab **Network** → klik kanan → **"Save all as HAR with content"**.
-2. Logout dari Kintara (kalau lagi login).
-3. Klik "Connect Wallet" → pilih wallet → **approve signature request**.
-4. Setelah masuk game, stop recording & save HAR.
+## Confirmed headless realtime areas
 
-Yang dicari di HAR:
-- Endpoint yang return **nonce/challenge** untuk ditandatangani (mirip `POST /api/auth/challenge`)
-- Endpoint **verify signature** yang return session cookie / JWT (mirip `POST /api/auth/verify`)
-- Apakah ada **WebSocket handshake** (cek tab WS di Network) — kalau Kintara juga pakai socket.io
-  seperti Owntown, ini krusial untuk movement & realtime actions.
+- Wallet auth through `lib/walletAuth.js`
+- Queue and presence WebSocket through `lib/presenceWs.js`
+- Movement through presence position messages
+- Fishing/cooking loop through `tools/bot-headless.js`
+- Gathering/mining through `tools/gather-bot.js`
+- Banking selected tradeable loot through `lib/bank.js`
+- Daily quest orchestration through `tools/orchestrator.js`
+- Telegram control through `tools/telegram-bot.js`
 
-### 2. Movement / Position Update
-1. Record HAR.
-2. Jalan-jalan beberapa langkah di game.
-3. Stop & save.
+## Still useful to capture with HAR or live protocol review
 
-Cari: request POST/WS message yang berisi `{realm, col, row}` atau delta posisi —
-ini akan jadi dasar untuk auto-walk ke node resource.
+### 1. Combat edge cases
 
-### 3. Gathering Actions (chop wood / mining / fishing cast)
-1. Record HAR.
-2. Lakukan satu aksi chop kayu sampai dapat hasil (kayu masuk inventory).
-3. Lakukan satu aksi mining (pickaxe ke rock node).
-4. Lakukan satu aksi fishing cast → tunggu hasil → `grant-fish-xp` sudah confirmed,
-   tapi **trigger aksi cast/reel-nya** belum.
-5. Stop & save.
+Capture a supervised attack against one Wilderness mob and verify:
 
-Cari pola: request dengan `nodeId`/`tileId`/`resourceType`, atau WS event seperti
-`gathering:start` / `gathering:result` (kalau ada socket.io, cek tab WS → Messages).
+- exact `wm_ev` payload fields used by the official client,
+- HP/shield update message order,
+- kill attribution fields,
+- daily quest increment behavior,
+- whether loot bags or drops need an additional REST call.
 
-### 4. Combat (Wilderness)
-1. Record HAR.
-2. Serang satu mob (`wild_zombie`/wolf) sampai mati, loot drop.
-3. Stop & save.
+### 2. Marketplace create listing edge cases
 
-Cari: request attack + response drop/loot, atau WS event `combat:attack`/`combat:result`.
+Capture creating and canceling one small listing to confirm:
 
-### 5. Marketplace — Create Listing
-Dokumen yang ada cuma punya GET listings & token-buy. Endpoint **jual/list item**
-(`POST /api/marketplace/listings` atau sejenisnya) belum confirmed.
-1. Record HAR → buat 1 listing baru dari inventory → save.
+- request body shape,
+- slot kind/index semantics,
+- reserve/release behavior,
+- failure responses for stale inventory state.
 
-### 6. Bank Deposit/Withdraw
-Endpoint spesifik deposit/withdraw OTWN-equivalent ($KINS atau gold ke bank) belum confirmed —
-hanya `unlock-page`.
-1. Record HAR → lakukan 1x deposit kecil → save.
+### 3. Bank deposit/withdraw details
 
-## Analisa HAR (otomatis)
-Begitu file `.har` siap, jalankan:
+Capture manual deposit/withdraw for non-resource slot items to confirm:
+
+- slot move payload shape,
+- pagination behavior,
+- failure mode when bank pages are full.
+
+### 4. Spinner inventory constraints
+
+Capture a free spinner with a nearly full inventory/cosmetic bag to confirm:
+
+- exact server error codes,
+- whether resources require a free normal slot,
+- whether Red Aura requires a free cosmetic slot only.
+
+## HAR analysis helper
+
+When a HAR is available, run:
+
 ```bash
-node tools/har-analyze.js path/ke/capture.har          # ringkasan request relevan + daftar WebSocket
-node tools/har-analyze.js path/ke/capture.har --full    # semua request kintara + response body
+node tools/har-analyze.js path/to/capture.har
+node tools/har-analyze.js path/to/capture.har --full
 ```
-Tool ini hanya baca file lokal (tidak request ke server), auto-redact cookie/token,
-dan menandai request kandidat core-loop (move/gather/combat/listing/bank) + koneksi WS.
 
-## Implementasi (SUDAH jadi — client-authoritative fabrication)
-HAR mengonfirmasi: **0 WebSocket**, core loop client-authoritative. Tidak ada endpoint server
-"chop/attack/move" — client PUSH state. Yang sudah dibangun:
-- `lib/gameState.js` — `fetchState`/`fetchSkills`/`buildBackpackBody`/`pushBackpack`/`pushSkills`.
-  Selalu baca `stateSeq` fresh → `baseSeq`; preserve seluruh backpack (anti-wipe); `intentionalRemovals:[]`.
-- `modules/gathering.js` — `runGatherCycle` (woodcutting + mining), `computeGain` (rate manusiawi + cap).
-- `modules/movement.js` — `moveTo` via `save-spawn` (+ `planPath`).
-- `modules/combat.js` — `autoLoot` (ground-bags/loot-bag = jalur server asli).
-- `tools/farm-probe.js` — probe verify-before-blast.
+The helper reads local files only, redacts cookies/tokens, and highlights Kintara requests and WebSocket candidates.
 
-Semua dikunci di belakang `FABRICATE_ENABLED` (master) + per-fitur `GATHER_ENABLED`/`AUTOLOOT_ENABLED`,
-default OFF. **Jalankan probe dulu** dengan cookie asli sebelum mengaktifkan gather massal.
+## Safety baseline
 
-### Masih butuh ACTION-HAR
-- `grant-fish-xp` payload/response (fishing skill sementara via save-skills generik).
-- Mekanik increment kill-count quest `wild_zombie` (`combat.killForQuest` masih `throw`).
-
-## Cara kirim hasil ke saya
-- Upload file `.har` (text/JSON, biasanya besar — kalau kepanjangan, filter dulu request
-  yang ke `kintara.gg` / `ktra-server-b.onrender.com` aja, atau kompres jadi snippet
-  request/response yang relevan).
-- Atau cukup copy-paste: URL, method, request body, dan response body dari request yang relevan
-  (hilangkan/redact cookie & token sebelum kirim).
+- Keep all write/push operations based on a fresh `/api/auth/me` state sequence.
+- Preserve full backpack structures when saving inventory.
+- Keep one worker per account to avoid overwriting state.
+- Prefer static review first; only run live game actions when explicitly requested.

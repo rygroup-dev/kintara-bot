@@ -19,6 +19,7 @@ const OUT = path.join(ROOT, 'recon');
 const PIDFILE = path.join(OUT, 'control', 'fishbot.pid');
 const GPIDFILE = path.join(OUT, 'control', 'gatherbot.pid');
 const OPIDFILE = path.join(OUT, 'control', 'orch.pid');
+const CPIDFILE = path.join(OUT, 'control', 'combatbot.pid');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DAILY_SPINNER_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
@@ -41,6 +42,7 @@ function readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } ca
 function pidOf(f) { const p = readJson(f); if (!p?.pid) return null; try { process.kill(p.pid, 0); return p.pid; } catch { return null; } }
 function botPid() { return pidOf(PIDFILE); }
 function gatherPid() { return pidOf(GPIDFILE); }
+function combatPid() { return pidOf(CPIDFILE); }
 function spawnBot(script, args, pidfile) {
   const child = cp.spawn('node', [path.join(ROOT, 'tools', script), ...args], { detached: true, stdio: 'ignore', cwd: ROOT });
   child.unref(); fs.writeFileSync(pidfile, JSON.stringify({ pid: child.pid, started: Date.now() }));
@@ -50,9 +52,9 @@ function spawnBot(script, args, pidfile) {
 // ---------- handlers ----------
 async function hStatus() {
   await client().catch(() => null);
-  const fr = botPid(), gr = gatherPid(), or = pidOf(OPIDFILE);
+  const fr = botPid(), gr = gatherPid(), cb = combatPid(), or = pidOf(OPIDFILE);
   const gk = readJson(GPIDFILE)?.kind; const gLbl = gk === 'rock' ? '⛏Mining' : gk === 'tree' ? '🪓Wood' : 'Gather';
-  let out = `🤖 <b>Kintara Bot Status</b> — ${who()}\n🧠 Auto: ${or ? '🟢 ON' : '🔴 OFF'} | Fishing: ${fr ? '🟢' : '🔴'} | ${gLbl}: ${gr ? '🟢' : '🔴'}`;
+  let out = `🤖 <b>Kintara Bot Status</b> — ${who()}\n🧠 Auto: ${or ? '🟢 ON' : '🔴 OFF'} | Fishing: ${fr ? '🟢' : '🔴'} | ${gLbl}: ${gr ? '🟢' : '🔴'} | ⚔️Combat: ${cb ? '🟢' : '🔴'}`;
   if (or) {
     const o = readJson(path.join(OUT, 'orchestrator-state.json'));
     if (o) {
@@ -64,6 +66,8 @@ async function hStatus() {
   if (fr && s) out += `\n🎣 fish: ${s.fish} | 🍳 cooked: ${s.cooked} | ✅ ${s.ok}/${s.casts} | 💰 ${s.sold || 0} | ⏱ ${s.ageMin}m`;
   const g = readJson(path.join(OUT, 'gather-state.json'));
   if (gr && g) out += `\n🪓 felled: ${g.felled} | 🪵 wood: ${g.wood} | 🪨 stone: ${g.stone} | coal: ${g.coal} | ⏱ ${g.ageMin}m`;
+  const cs = readJson(path.join(OUT, 'combat-state.json'));
+  if (cb && cs) out += `\n⚔️ kills: ${cs.kills} | 🗡️ hits: ${cs.hits} | 📈 +${cs.combatGain || 0}XP | ❤️ HP ${cs.hp} | 🧪 left ${cs.potionsHealthLeft ?? 0}H/${cs.potionsShieldLeft ?? 0}S | 🏃 ${cs.retreats || 0} | 📍 ${cs.region} | ⏱ ${cs.ageMin}m`;
   return out;
 }
 async function hSkills() {
@@ -156,9 +160,9 @@ async function hSpinner(args = []) {
   if (spinnerBusy) return `🎡 <b>Free Spinner</b> — ${who()}\n⏳ Spinner request already in progress.`;
 
   const force = args.map((x) => String(x || '').toLowerCase()).includes('force');
-  const fr = botPid(), gr = gatherPid();
-  if (fr || gr) {
-    return `🎡 <b>Free Spinner</b> — ${who()}\n⚠️ Stop fishing/gathering before spinning. Spinner and workers can both update backpack state, so spinning during an active worker could overwrite rewards.\n\nRun /stop, then /spinner.`;
+  const fr = botPid(), gr = gatherPid(), cb = combatPid();
+  if (fr || gr || cb) {
+    return `🎡 <b>Free Spinner</b> — ${who()}\n⚠️ Stop fishing/gathering/combat before spinning. Spinner and workers can both update backpack state, so spinning during an active worker could overwrite rewards.\n\nRun /stop, then /spinner.`;
   }
 
   spinnerBusy = true;
@@ -199,13 +203,13 @@ async function hSpinner(args = []) {
   }
 }
 function hStartFish() {
-  if (gatherPid()) return '⚠️ Gather bot is ON — run /stop first (1 account = 1 activity).';
+  if (gatherPid() || combatPid()) return '⚠️ Another bot is ON — run /stop first (1 account = 1 activity).';
   if (botPid()) return '🎣 Fishing bot is already ON.';
   const pid = spawnBot('bot-headless.js', [config.shard], PIDFILE);
   return `🎣 Fishing bot START (pid ${pid}). Queues for ~10min, then grinds+cooks. Check /status.`;
 }
 function hStartGather(args) {
-  if (botPid()) return '⚠️ Fishing bot is ON — run /stop first (1 account = 1 activity).';
+  if (botPid() || combatPid()) return '⚠️ Another bot is ON — run /stop first (1 account = 1 activity).';
   const kind = (args[0] === 'rock' || args[0] === 'stone' || args[0] === 'coal' || args[0] === 'mine') ? 'rock' : 'tree';
   const lbl = kind === 'rock' ? '⛏ mine stone/coal' : '🪓 chop wood';
   const running = gatherPid(); const cur = readJson(GPIDFILE);
@@ -215,25 +219,35 @@ function hStartGather(args) {
   fs.writeFileSync(GPIDFILE, JSON.stringify({ pid, kind, started: Date.now() })); // save kind
   return `${lbl} START (pid ${pid})${running ? ' [switched from ' + (cur?.kind || '?') + ']' : ''}. Queues for ~10min. Check /status.`;
 }
+
+function hStartCombat() {
+  if (botPid() || gatherPid() || pidOf(OPIDFILE)) return '⚠️ Another bot is ON — run /stop first (1 account = 1 activity).';
+  if (combatPid()) return '⚔️ Combat bot is already ON.';
+  const pid = spawnBot('combat-bot.js', [config.shard], CPIDFILE);
+  return `⚔️ Combat bot START (pid ${pid}).\n🏦 Banks loot first for safety → enters Wilderness → hunts zombies.\n🛡️ Auto-potion + retreat on critical HP. Queue can take ~10min. Check /status.\n\n<i>⚠️ Wilderness has PvP risk. Banked loot stays safe even if you die.</i>`;
+}
+
 function hAuto() {
   if (pidOf(OPIDFILE)) return '🧠 Orchestrator is already ON.';
+  if (combatPid()) return '⚔️ Combat bot is already ON.';
   const pid = spawnBot('orchestrator.js', [], OPIDFILE);
   return `🧠 Orchestrator START (pid ${pid}) — auto-selects fishing/gather by goal. Use /stop to turn it off.`;
 }
 function hStop() {
   let msg = [];
   // stop orchestrator first so it does not restart bots
-  for (const [name, pf] of [['Orchestrator', OPIDFILE], ['Fishing', PIDFILE], ['Gather', GPIDFILE]]) {
+  for (const [name, pf] of [['Orchestrator', OPIDFILE], ['Fishing', PIDFILE], ['Gather', GPIDFILE], ['Combat', CPIDFILE]]) {
     const pid = pidOf(pf);
     if (pid) { try { process.kill(pid, 'SIGKILL'); } catch {} try { fs.unlinkSync(pf); } catch {} msg.push(`🛑 ${name} STOP (pid ${pid})`); }
   }
   return msg.length ? msg.join('\n') : '🔴 All bots are already OFF.';
 }
+
 function hHelp() {
   return `🤖 <b>Kintara Bot — Commands</b>\n` +
-    `/status — bot status & inventory\n/skills — skill XP & levels\n/balance — gold/$KINS/resources\n/quest — daily quest\n/claim — claim completed daily quests\n` +
-    `/spinner — free spinner wheel\n/fish — fishing + cooking\n/gather — chop wood 🪓\n/mine — mining stone/coal ⛏\n/auto — orchestrator auto-selects 🧠\n/stop — STOP all\n/help — help\n\n` +
-    `<i>1 account = 1 activity (safer for anti-cheat). /combat soon.</i>`;
+    `/status — bot status and inventory\n/skills — XP and skill levels\n/balance — gold/$KINS/resources\n/quest — daily quest\n/claim — claim completed daily quests\n` +
+    `/spinner — free daily spinner\n/fish — fishing + cooking\n/gather — chop wood 🪓\n/mine — mine stone/coal ⛏\n/combat — hunt Wilderness zombies ⚔️\n/auto — auto-select activity 🧠\n/stop — stop all bots\n/help — command list\n\n` +
+    `<i>1 account = 1 activity for safer automation. Combat banks first and uses auto-survival.</i>`;
 }
 
 const commands = {
@@ -242,7 +256,7 @@ const commands = {
   quest: hQuest, claim: hClaimQuests, claimquests: hClaimQuests, fish: hStartFish, stop: hStop,
   spinner: hSpinner, spin: hSpinner,
   gather: hStartGather, chop: hStartGather, mine: () => hStartGather(['rock']),
-  auto: hAuto, combat: () => '⚔️ Combat is being prepared (RE combat WS messages + survival).',
+  auto: hAuto, combat: hStartCombat,
   sell: () => '💰 Sell is active after the tutorial is complete.',
 };
 
@@ -251,6 +265,7 @@ const MENU = [
   { command: 'fish', description: '🎣 Fishing + cooking' },
   { command: 'gather', description: '🪓 Chop wood' },
   { command: 'mine', description: '⛏ Mining stone/coal' },
+  { command: 'combat', description: '⚔️ Wilderness combat' },
   { command: 'auto', description: '🧠 Auto-select activity' },
   { command: 'stop', description: '⏹️ Stop all bots' },
   { command: 'status', description: '📊 Bot status + inventory' },
