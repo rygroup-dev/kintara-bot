@@ -43,10 +43,10 @@ The Telegram bot is the control plane. It starts activity scripts as detached ch
 
 | Process | Entry point | Notes |
 |---|---|---|
-| Control bot | `tools/telegram-bot.js` | Long-polls Telegram and handles `/fish`, `/gather`, `/mine`, `/auto`, `/stop`, `/status`, `/skills`, `/balance`, `/quest`. |
+| Control bot | `tools/telegram-bot.js` | Long-polls Telegram and handles `/fish`, `/gather`, `/mine`, `/auto`, `/stop`, `/status`, `/skills`, `/balance`, `/quest`, `/claim`. |
 | Fishing bot | `tools/bot-headless.js` | Connects to Kintara presence, walks to pond, fishes, cooks, optionally sells excess fish. |
 | Gathering bot | `tools/gather-bot.js` | Learns resource nodes from WebSocket events, walks to nodes, harvests, persists loot. |
-| Orchestrator | `tools/orchestrator.js` | Chooses fishing or gathering based on quests, inventory, and skill levels. |
+| Orchestrator | `tools/orchestrator.js` | Claims completed daily quests, then chooses fishing or gathering based on daily quests, inventory, and skill levels. |
 | Daily quest bot | `tools/daily-quest.js` | Polls daily quest progress and claims completed quests. |
 
 ## Data flow
@@ -73,6 +73,17 @@ session cookie
   -> REST grants or state reads
   -> recon/* runtime state
   -> Telegram /status output
+```
+
+### Auto decision loop
+
+```text
+dailyQuestProgress()
+  -> claim completed quests
+  -> fish if pending fish daily quest
+  -> gather if pending gather/mining daily quest
+  -> otherwise use skills/materials fallback
+  -> write orchestrator-state.json
 ```
 
 ## Dependencies

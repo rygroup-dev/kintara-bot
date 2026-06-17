@@ -34,7 +34,8 @@ The primary user is an operator who controls the bot through Telegram. The opera
 1. Operator starts `tools/telegram-bot.js` with `yarn start` or `npm start`.
 2. Telegram bot receives commands from the configured `TELEGRAM_CHAT_ID`.
 3. Commands spawn or stop activity processes.
-4. Status commands read local runtime state and Kintara API state.
+4. Status and quest commands read local runtime state and Kintara API state.
+5. `/claim` manually claims every completed daily quest that is not claimed yet.
 
 ### Wallet login
 
@@ -50,6 +51,14 @@ The primary user is an operator who controls the bot through Telegram. The opera
 2. Bot sends position/action messages that match the Kintara protocol.
 3. Bot calls REST endpoints for grants, inventory, quests, marketplace, or state reads.
 4. Bot writes runtime state to `recon/` for Telegram status output.
+
+### Auto orchestration
+
+1. `/auto` starts `tools/orchestrator.js`.
+2. The orchestrator claims any completed daily quests first.
+3. Pending fishing daily quests take priority.
+4. Pending gather/mining daily quests come next.
+5. If no actionable daily quest is pending, the existing skills/materials logic decides between gathering and fishing.
 
 ## Required configuration
 
@@ -76,5 +85,6 @@ The primary user is an operator who controls the bot through Telegram. The opera
 
 - Operator can start the Telegram controller without Chrome.
 - Operator can trigger one activity at a time.
+- `/auto` prioritizes daily quest completion before normal farming goals.
 - Runtime state is visible through Telegram status commands.
 - Secrets are not committed to the repository.

@@ -71,6 +71,27 @@ async function hQuest() {
   });
   return `📋 <b>Daily Quest</b> (${dq.day})\n` + lines.join('\n');
 }
+async function hClaimQuests() {
+  const c = await client(); const q = await c.dailyQuestProgress().catch(() => ({}));
+  const dq = q?.dailyQuest || {}; const cfg = q?.dailyQuestConfig || {};
+  const prog = dq.prog || {}; const claimed = dq.claimed || {};
+  const ready = (cfg.quests || []).filter((quest) => !claimed[quest.id] && (prog[quest.id] || 0) >= quest.target);
+  if (!ready.length) return `🎁 <b>Daily Quest Claim</b>\nNo completed quests ready to claim.`;
+
+  const ok = [], failed = [];
+  for (const quest of ready) {
+    try {
+      await c.dailyQuestClaim(quest.id);
+      ok.push(`✅ ${quest.label || quest.kind} (${quest.rewardXpSpreadTotal || 0}XP)`);
+    } catch (e) {
+      failed.push(`⚠️ ${quest.label || quest.kind}: ${(e.message || '').slice(0, 60)}`);
+    }
+  }
+
+  return `🎁 <b>Daily Quest Claim</b>\n` +
+    (ok.length ? ok.join('\n') : 'No quests claimed.') +
+    (failed.length ? `\n\n${failed.join('\n')}` : '');
+}
 function hStartFish() {
   if (gatherPid()) return '⚠️ Gather bot is ON — run /stop first (1 account = 1 activity).';
   if (botPid()) return '🎣 Fishing bot is already ON.';
@@ -104,7 +125,7 @@ function hStop() {
 }
 function hHelp() {
   return `🤖 <b>Kintara Bot — Commands</b>\n` +
-    `/status — bot status & inventory\n/skills — skill XP & levels\n/balance — gold/$KINS/resources\n/quest — daily quest\n` +
+    `/status — bot status & inventory\n/skills — skill XP & levels\n/balance — gold/$KINS/resources\n/quest — daily quest\n/claim — claim completed daily quests\n` +
     `/fish — fishing + cooking\n/gather — chop wood 🪓\n/mine — mining stone/coal ⛏\n/auto — orchestrator auto-selects 🧠\n/stop — STOP all\n/help — help\n\n` +
     `<i>1 account = 1 activity (safer for anti-cheat). /combat soon.</i>`;
 }
@@ -112,7 +133,7 @@ function hHelp() {
 const commands = {
   start: () => hHelp(), help: () => hHelp(),
   status: hStatus, skills: hSkills, balance: hBalance, saldo: hBalance,
-  quest: hQuest, fish: hStartFish, stop: hStop,
+  quest: hQuest, claim: hClaimQuests, claimquests: hClaimQuests, fish: hStartFish, stop: hStop,
   gather: hStartGather, chop: hStartGather, mine: () => hStartGather(['rock']),
   auto: hAuto, combat: () => '⚔️ Combat is being prepared (RE combat WS messages + survival).',
   sell: () => '💰 Sell is active after the tutorial is complete.',
@@ -129,6 +150,7 @@ const MENU = [
   { command: 'skills', description: '📈 Skill levels & XP' },
   { command: 'balance', description: '💰 Gold/$KINS/resources' },
   { command: 'quest', description: '📋 Daily quest' },
+  { command: 'claim', description: '🎁 Claim completed quests' },
   { command: 'help', description: '❓ Command list' },
 ];
 async function syncMenu() {

@@ -6,9 +6,11 @@
 // the goal chunk is complete, not every minute.
 //
 // Goal priority (default):
-//   1) Low cooking skill / need fish -> FISHING (fish+cook)
-//   2) Low woodcutting/mining / need materials (build/sell) -> GATHER (all)
-//   3) Default -> FISHING (high XP/value)
+//   1) Completed daily quests -> claim immediately
+//   2) Pending fishing daily quest -> FISHING (fish+cook)
+//   3) Pending gather/mining daily quest -> GATHER (all)
+//   4) Low woodcutting/mining / need materials (build/sell) -> GATHER (all)
+//   5) Default -> FISHING (high XP/value)
 //
 // Usage: node tools/orchestrator.js
 const fs = require('fs');
@@ -34,6 +36,48 @@ const MIN_RUN_MS = 1500000;      // minimum 25 minutes per activity before switc
 let cli, lastAuth = 0, current = null, currentSince = 0, myPid = null;
 async function client() { if (!cli || Date.now() - lastAuth > 1500000) { const a = await login(); cli = new KintaraClient({ cookie: a.cookie }); myPid = a.player?.id || myPid; lastAuth = Date.now(); } return cli; }
 
+function questProgress(q, quest) {
+  return (q?.dailyQuest?.prog || {})[quest.id] || 0;
+}
+
+function questClaimed(q, quest) {
+  return !!((q?.dailyQuest?.claimed || {})[quest.id]);
+}
+
+function isQuestPending(q, quest) {
+  return !questClaimed(q, quest) && questProgress(q, quest) < quest.target;
+}
+
+function isQuestReady(q, quest) {
+  return !questClaimed(q, quest) && questProgress(q, quest) >= quest.target;
+}
+
+function isGatherQuestKind(kind) {
+  return ['gather', 'tree', 'wood', 'woodcutting', 'rock', 'stone', 'coal', 'mining'].includes(String(kind || '').toLowerCase());
+}
+
+async function claimReadyQuests(c, q) {
+  const quests = q?.dailyQuestConfig?.quests || [];
+  const claimed = [];
+  for (const quest of quests) {
+    if (!isQuestReady(q, quest)) continue;
+    try {
+      const r = await c.dailyQuestClaim(quest.id);
+      claimed.push({ id: quest.id, kind: quest.kind, label: quest.label, rewardXp: quest.rewardXpSpreadTotal });
+      if (!q.dailyQuest) q.dailyQuest = {};
+      if (!q.dailyQuest.claimed) q.dailyQuest.claimed = {};
+      q.dailyQuest.claimed[quest.id] = true;
+      log(`🎁 CLAIMED daily ${quest.kind} (${quest.rewardXpSpreadTotal}XP) -> ${JSON.stringify(r).slice(0, 80)}`);
+    } catch (e) {
+      log(`daily claim ${quest.kind} failed: ${(e.message || '').slice(0, 60)}`);
+    }
+  }
+  if (claimed.length) {
+    await tg.send('🎁 <b>Daily quest claimed</b>\n' + claimed.map((x) => `✅ ${x.label || x.kind} (${x.rewardXp || 0}XP)`).join('\n')).catch(() => {});
+  }
+  return claimed;
+}
+
 function ensureOnly(activity) {
   // ensure only `activity` is running
   const fp = pidOf(FPID), gp = pidOf(GPID);
@@ -51,17 +95,25 @@ async function decide() {
   const me = await c.me().catch(() => ({})); const bp = me.backpack || {};
   const st = await c.playerStats(myPid).catch(() => ({})); const xp = st.skillXp || {};
   let q = {}; try { q = await c.dailyQuestProgress(); } catch {}
+  const claimedNow = await claimReadyQuests(c, q);
   const quests = q?.dailyQuestConfig?.quests || [];
   // goal signals
-  const needFishQuest = quests.some((x) => x.kind === 'fish' && (q.dailyQuest?.prog?.[x.id] || 0) < x.target);
+  const needFishQuest = quests.some((x) => x.kind === 'fish' && isQuestPending(q, x));
+  const needGatherQuest = quests.some((x) => isGatherQuestKind(x.kind) && isQuestPending(q, x));
   const woodLow = (bp.wood || 0) < 100, stoneLow = (bp.stone || 0) < 100;
   const gatherSkillLow = (xp.woodcutting || 0) < 5000 || (xp.mining || 0) < 5000; // gather skills are still low
   // decision
   let goal, why;
   if (needFishQuest) { goal = 'fish'; why = 'daily fish quest is not complete yet'; }
+  else if (needGatherQuest) { goal = 'gather'; why = 'daily gather/mining quest is not complete yet'; }
   else if (gatherSkillLow && (woodLow || stoneLow)) { goal = 'gather'; why = 'woodcutting/mining skill + materials are still low'; }
   else { goal = 'fish'; why = 'default: fishing has high XP/value'; }
-  return { goal, why, snapshot: { wood: bp.wood, stone: bp.stone, coal: bp.coal, fish: bp.fish, woodcutting: xp.woodcutting, mining: xp.mining, fishing: xp.fishing, avg: st.avg } };
+  const daily = {
+    day: q?.dailyQuest?.day,
+    claimedNow: claimedNow.length,
+    pending: quests.filter((x) => isQuestPending(q, x)).map((x) => ({ id: x.id, kind: x.kind, progress: questProgress(q, x), target: x.target })),
+  };
+  return { goal, why, forceSwitch: needFishQuest || needGatherQuest, snapshot: { wood: bp.wood, stone: bp.stone, coal: bp.coal, fish: bp.fish, woodcutting: xp.woodcutting, mining: xp.mining, fishing: xp.fishing, avg: st.avg, daily } };
 }
 
 (async () => {
@@ -74,7 +126,7 @@ async function decide() {
       const d = await decide();
       log(`evaluate: goal=${d.goal} (${d.why}) | ${JSON.stringify(d.snapshot)}`);
       const elapsed = Date.now() - currentSince;
-      if (d.goal !== current && (current === null || elapsed > MIN_RUN_MS)) {
+      if (d.goal !== current && (d.forceSwitch || current === null || elapsed > MIN_RUN_MS)) {
         ensureOnly(d.goal); current = d.goal; currentSince = Date.now();
         await tg.send(`🧠 Switch -> <b>${d.goal === 'fish' ? '🎣 Fishing' : '🪓 Gather'}</b>\n${d.why}`).catch(() => {});
       } else { ensureOnly(current || d.goal); if (!current) { current = d.goal; currentSince = Date.now(); } }

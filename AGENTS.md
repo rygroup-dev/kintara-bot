@@ -40,6 +40,12 @@ Read these files before making changes:
 
 There is no `dev` script.
 
+## Orchestrator behavior
+
+`/auto` is daily-first. It claims completed daily quests, prioritizes pending fishing quests, then pending gather/mining quests, and only then falls back to the existing skills/materials decision logic.
+
+Telegram also exposes `/claim` for a manual one-shot claim of every completed daily quest.
+
 ## Security notes
 
 - `WALLET_PRIVATE_KEY` is a high-value secret. Treat it as equivalent to wallet ownership.

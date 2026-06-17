@@ -45,6 +45,7 @@ After installation, open your Telegram bot and send `/start`:
 | `/skills` | 📈 Skill levels and XP |
 | `/balance` | 💰 Gold / $KINS / resources |
 | `/quest` | 📋 Daily quest |
+| `/claim` | 🎁 Claim all completed daily quests |
 | `/help` | ❓ Command list |
 
 > **1 account = 1 activity**: fishing **or** gathering. This is more natural and safer for anti-cheat behavior.
