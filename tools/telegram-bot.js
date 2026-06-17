@@ -52,7 +52,13 @@ async function hStatus() {
   const fr = botPid(), gr = gatherPid(), or = pidOf(OPIDFILE);
   const gk = readJson(GPIDFILE)?.kind; const gLbl = gk === 'rock' ? '⛏Mining' : gk === 'tree' ? '🪓Wood' : 'Gather';
   let out = `🤖 <b>Kintara Bot Status</b> — ${who()}\n🧠 Auto: ${or ? '🟢 ON' : '🔴 OFF'} | Fishing: ${fr ? '🟢' : '🔴'} | ${gLbl}: ${gr ? '🟢' : '🔴'}`;
-  if (or) { const o = readJson(path.join(OUT, 'orchestrator-state.json')); if (o) out += `\n🎯 ${o.current} — ${o.why}`; }
+  if (or) {
+    const o = readJson(path.join(OUT, 'orchestrator-state.json'));
+    if (o) {
+      const ageSec = o.ts ? Math.max(0, Math.round((Date.now() - o.ts) / 1000)) : null;
+      out += `\n🎯 ${o.current} — ${o.why}${ageSec == null ? '' : `\n🕒 Last auto check: ${ageSec}s ago`}`;
+    }
+  }
   const s = readJson(path.join(OUT, 'bot-state.json'));
   if (fr && s) out += `\n🎣 fish: ${s.fish} | 🍳 cooked: ${s.cooked} | ✅ ${s.ok}/${s.casts} | 💰 ${s.sold || 0} | ⏱ ${s.ageMin}m`;
   const g = readJson(path.join(OUT, 'gather-state.json'));

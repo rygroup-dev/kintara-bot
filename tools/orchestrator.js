@@ -31,7 +31,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const pidOf = (f) => { const p = readJson(f); if (!p?.pid) return null; try { process.kill(p.pid, 0); return p.pid; } catch { return null; } };
 
-const EVAL_MS = 600000;          // evaluate every 10 minutes and switch sparingly
+const EVAL_MS = 60000;           // evaluate daily quest progress every minute; MIN_RUN_MS still avoids non-daily thrashing
 const MIN_RUN_MS = 1500000;      // minimum 25 minutes per activity before switching to avoid queue thrashing
 
 let cli, lastAuth = 0, current = null, currentSince = 0, myPid = null, myName = '';
