@@ -67,7 +67,21 @@ async function hStatus() {
   const g = readJson(path.join(OUT, 'gather-state.json'));
   if (gr && g) out += `\n🪓 felled: ${g.felled} | 🪵 wood: ${g.wood} | 🪨 stone: ${g.stone} | coal: ${g.coal} | ⏱ ${g.ageMin}m`;
   const cs = readJson(path.join(OUT, 'combat-state.json'));
-  if (cb && cs) out += `\n⚔️ kills: ${cs.kills} | 🗡️ hits: ${cs.hits} | 📈 +${cs.combatGain || 0}XP | ❤️ HP ${cs.hp} | 🧪 left ${cs.potionsHealthLeft ?? 0}H/${cs.potionsShieldLeft ?? 0}S | 🏃 ${cs.retreats || 0} | 📍 ${cs.region} | ⏱ ${cs.ageMin}m`;
+  if (cb && cs) {
+    const phaseMap = {
+      boot: 'boot',
+      prep: 'prep',
+      queue: cs.queueAhead != null ? `queue ${cs.queueAhead}` : 'queue',
+      presence: 'presence',
+      wild: 'wild',
+      hunt: 'hunt',
+      retreat: 'retreat',
+      exit: 'exit',
+      reconnect: 'reconnect',
+    };
+    const phaseLabel = cs.phase ? (phaseMap[cs.phase] || cs.phase) : null;
+      out +=`⚔️ kill ${cs.kills || 0} | 🗡️ ${cs.hits || 0} | 📈 +${cs.combatGain || 0}XP | ❤️ ${cs.hp || 0} | 🧪 ${cs.potionsHealth || 0}H/${cs.potionsShield || 0}S | 🏃 ${cs.retreats || 0}${phaseLabel ? ` | 📍 ${phaseLabel}` : ''} | ⏱ ${fmtAgeMin(cs.ageMin)}`;
+  } 
   return out;
 }
 async function hSkills() {

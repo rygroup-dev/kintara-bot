@@ -7,7 +7,7 @@
 Fully **headless** automation bot for [Kintara.gg](https://kintara.gg), a Solana isometric MMO.
 **No browser required.** Wallet login and full control through **Telegram**.
 
-🎣 Fishing · 🍳 Cooking · 🪓 Woodcutting · ⛏ Mining (stone/coal) · 🏦 Banking · 💰 Marketplace · 📋 Daily Quest · 🧠 Auto-Orchestrator
+🎣 Fishing · 🍳 Cooking · 🪓 Woodcutting · ⛏ Mining (stone/coal/metal) · 🏦 Banking · 💰 Marketplace · 📋 Daily Quest · 🧠 Auto-Orchestrator
 
 [![Node](https://img.shields.io/badge/node-%3E%3D18-43853d?logo=node.js&logoColor=white)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -38,7 +38,7 @@ After installation, open your Telegram bot and send `/start`:
 |---------|--------|
 | `/fish` | 🎣 Fishing + auto-cooking |
 | `/gather` | 🪓 Chop wood |
-| `/mine` | ⛏ Mine stone + coal |
+| `/mine` | ⛏ Mine stone + coal + metal |
 | `/auto` | 🧠 Let the orchestrator choose the activity automatically |
 | `/stop` | ⏹️ Stop all bots |
 | `/status` | 📊 Live status + inventory |

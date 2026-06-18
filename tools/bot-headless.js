@@ -9,12 +9,19 @@ const fs = require('fs');
 const path = require('path');
 const { Presence } = require('../lib/presenceWs');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login } = require('../lib/walletAuth');
+const { login, isWalletBannedError } = require('../lib/walletAuth');
 const { config } = require('../config');
+const { pickPlayerName } = require('../lib/playerIdentity');
 
 const SHARD = process.argv[2] || config.shard;
 const OUT = path.join(__dirname, '..', 'recon');
-const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'bot.log'), s + '\n'); };
+let playerName = '';
+const playerLogLabel = () => playerName || 'Unknown player';
+const log = (...a) => {
+  const s = `[${new Date().toISOString().slice(11, 19)}] [${playerLogLabel()}] ${a.join(' ')}`;
+  console.log(s);
+  fs.appendFileSync(path.join(OUT, 'bot.log'), s + '\n');
+};
 const _thr = {};
 const logThrottle = (key, msg, everyMs = 30000) => { const now = Date.now(); if (!_thr[key] || now - _thr[key] > everyMs) { _thr[key] = now; log(msg); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -23,7 +30,16 @@ const PORTAL = { x: 61 - 30.5, z: 31 - 30.5 }; // mainland east -> pond
 let cli, auth;
 const stats = { fish: 0, casts: 0, ok: 0, cooked: 0, sold: 0, rate: 0, reconnects: 0, started: Date.now() };
 
-async function freshAuth() { auth = await login(); cli = new KintaraClient({ cookie: auth.cookie }); return auth; }
+function updatePlayerName(...sources) {
+  playerName = pickPlayerName(...sources) || playerName;
+}
+
+async function freshAuth() {
+  auth = await login();
+  updatePlayerName(auth.player);
+  cli = new KintaraClient({ cookie: auth.cookie });
+  return auth;
+}
 
 async function connectWithRetry() {
   for (let attempt = 1; ; attempt++) {
@@ -35,6 +51,7 @@ async function connectWithRetry() {
       log('✅ presence live, region=' + p.region);
       return p;
     } catch (e) {
+      if (isWalletBannedError(e)) throw e;
       log(`connect attempt ${attempt} failed: ${e.message.slice(0, 60)} — retry 15s`);
       await sleep(15000);
       if (attempt % 3 === 0) { try { await freshAuth(); log('re-auth cookie'); } catch {} }
@@ -136,10 +153,12 @@ async function fishLoop(p) {
 }
 
 (async () => {
+  fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, 'bot.log'), '');
   await freshAuth();
   const me0 = await cli.me().catch(() => ({}));
-  log('BOT START pid=' + auth.player?.id + ' fish0=' + me0?.backpack?.fish);
+  updatePlayerName(me0?.player, me0, auth.player);
+  log('BOT START player=' + playerLogLabel() + ' fish0=' + me0?.backpack?.fish);
   stats.fish = me0?.backpack?.fish || 0;
 
   for (;;) { // supervisor: reconnect forever

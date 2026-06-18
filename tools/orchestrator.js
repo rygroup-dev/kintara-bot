@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login } = require('../lib/walletAuth');
+const { login, isWalletBannedError } = require('../lib/walletAuth');
 const tg = require('../lib/telegram');
 const { config } = require('../config');
 const { pickPlayerName, pickPlayerId, playerLabel } = require('../lib/playerIdentity');
@@ -26,6 +26,8 @@ const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'recon');
 const CTRL = path.join(OUT, 'control');
 const FPID = path.join(CTRL, 'fishbot.pid'), GPID = path.join(CTRL, 'gatherbot.pid');
+const CPID = path.join(CTRL, 'combatbot.pid');
+const STATEFILE = path.join(OUT, 'orchestrator-state.json');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ORCH ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'orchestrator.log'), s + '\n'); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
@@ -48,6 +50,10 @@ async function client() {
   }
   return cli;
 }
+function saveState(data) {
+  fs.writeFileSync(STATEFILE, JSON.stringify({ ...data, ts: Date.now() }, null, 2));
+}
+
 function who() { return playerLabel({ name: myName, id: myPid }); }
 
 function questProgress(q, quest) {
@@ -118,7 +124,8 @@ async function claimReadyQuests(c, q) {
 
 function ensureOnly(activity, { gatherKind = 'all' } = {}) {
   // ensure only `activity` is running
-  const fp = pidOf(FPID), gp = pidOf(GPID);
+  const fp = pidOf(FPID), gp = pidOf(GPID), combatPid = pidOf(CPID);
+  if (combatPid) { try { process.kill(combatPid, 'SIGKILL'); fs.unlinkSync(CPID); } catch {} }
   if (activity === 'fish') {
     if (gp) { try { process.kill(gp, 'SIGKILL'); fs.unlinkSync(GPID); } catch {} }
     if (!pidOf(FPID)) { const c = cp.spawn('node', [path.join(ROOT, 'tools', 'bot-headless.js'), config.shard], { detached: true, stdio: 'ignore', cwd: ROOT }); c.unref(); fs.writeFileSync(FPID, JSON.stringify({ pid: c.pid, started: Date.now() })); log('▶️ START fishing (pid ' + c.pid + ')'); }
@@ -189,8 +196,16 @@ async function decide() {
         ensureOnly(active.goal, { gatherKind: active.gatherKind });
         if (!current) { current = d.key; currentSince = Date.now(); }
       }
-      fs.writeFileSync(path.join(OUT, 'orchestrator-state.json'), JSON.stringify({ current, goal: d.goal, gatherKind: d.gatherKind, why: d.why, snapshot: d.snapshot, ts: Date.now() }));
-    } catch (e) { log('err: ' + (e.message || '').slice(0, 60)); if (/cookie|401/.test(e.message || '')) lastAuth = 0; }
+      saveState({ current, goal: d.goal, gatherKind: d.gatherKind, why: d.why, snapshot: d.snapshot, ts: Date.now() });
+    } catch (e) {
+      if (isWalletBannedError(e)) {
+        log('fatal: wallet is banned by the server');
+        await tg.send(`⛔ ${who()} orchestrator stopped: wallet is banned by the server.`).catch(() => {});
+        process.exit(1);
+      }
+      log('err: ' + (e.message || '').slice(0, 60));
+      if (/cookie|401/.test(e.message || '')) lastAuth = 0;
+    }
     await sleep(EVAL_MS);
   }
 })().catch((e) => { log('FATAL ' + e.message); process.exit(1); });

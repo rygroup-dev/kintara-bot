@@ -97,6 +97,11 @@ const config = {
   bankAutoDeposit: (process.env.BANK_AUTO_DEPOSIT || 'false').toLowerCase() === 'true',
   bankKeepGold: parseInt(process.env.BANK_KEEP_GOLD || '200', 10), // gold kept on hand; extra is deposited
 
+  // ---- Combat supplies ----
+  combatMinGold: parseInt(process.env.COMBAT_MIN_GOLD || '20', 10), // jangan belanja potion kalau bikin gold turun di bawah ini
+  combatMinHealthPotions: parseInt(process.env.COMBAT_MIN_HEALTH_POTIONS || '6', 10),
+  combatMinShieldPotions: parseInt(process.env.COMBAT_MIN_SHIELD_POTIONS || '2', 10),
+
   // ---- Core-loop FABRICATION (client-authoritative). RISK: may violate ToS / anti-cheat. ----
   // Master kill switch: all fabricated actions are disabled when this is false.
   fabricateEnabled: (process.env.FABRICATE_ENABLED || 'false').toLowerCase() === 'true',
