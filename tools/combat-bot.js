@@ -18,7 +18,7 @@ const path = require('path');
 const { config } = require('../config');
 const { Presence } = require('../lib/presenceWs');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login, isWalletBannedError } = require('../lib/walletAuth');
+const { isWalletBannedError } = require('../lib/walletAuth');
 const bank = require('../lib/bank');
 
 const SHARD = process.argv[2] || config.shard || 's2';
@@ -335,10 +335,10 @@ async function connectWithRetry() {
   try { fs.writeFileSync(LOGFILE, ''); } catch {}
   try { fs.mkdirSync(path.dirname(PIDFILE), { recursive: true }); fs.writeFileSync(PIDFILE, JSON.stringify({ pid: process.pid, started: Date.now() })); } catch {}
   process.on('exit', () => { try { fs.unlinkSync(PIDFILE); } catch {} });
-  const a = await login();
-  cli = new KintaraClient({ cookie: a.cookie });
+  const { client: c, player } = await KintaraClient.create();
+  cli = c;
   saveState();
-  log('COMBAT BOT START pid=' + a.player?.id + ' shard=' + SHARD);
+  log('COMBAT BOT START pid=' + player?.id + ' shard=' + SHARD);
 
   for (;;) {
     const p = await connectWithRetry();

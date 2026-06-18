@@ -23,7 +23,7 @@ const PORTAL = { x: 61 - 30.5, z: 31 - 30.5 }; // mainland east -> pond
 let cli, auth;
 const stats = { fish: 0, casts: 0, ok: 0, cooked: 0, sold: 0, rate: 0, reconnects: 0, started: Date.now() };
 
-async function freshAuth() { auth = await login(); cli = new KintaraClient({ cookie: auth.cookie }); return auth; }
+async function freshAuth() { const r = await KintaraClient.create(); cli = r.client; auth = { cookie: cli.cookie, player: r.player }; return auth; }
 
 async function connectWithRetry() {
   for (let attempt = 1; ; attempt++) {

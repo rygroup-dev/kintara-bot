@@ -12,7 +12,7 @@ const { config } = require('../config');
 const tg = require('../lib/telegram');
 const { KintaraClient } = require('../lib/kintaraClient');
 const { levelFromTotalXp, formatSkillBandProgressShort, averageLevelFloor, preciseAverageLevel } = require('../lib/skillXp');
-const { login, isWalletBannedError } = require('../lib/walletAuth');
+const { isWalletBannedError } = require('../lib/walletAuth');
 const { Presence } = require('../lib/presenceWs');
 const { getErrors } = require('../lib/errorbus');
 
@@ -34,7 +34,7 @@ const VERSION_REVIEW_TIMEOUT_MS = parseInt(process.env.KINTARA_VERSION_REVIEW_TI
 let cli = null, lastAuth = 0, myPid = null;
 let activeVersionReviewSha = null;
 async function client() {
-  if (!cli || Date.now() - lastAuth > 1500000) { const a = await login(); cli = new KintaraClient({ cookie: a.cookie }); myPid = a.player?.id || myPid; lastAuth = Date.now(); }
+  if (!cli) { const { client: c, player } = await KintaraClient.create(); cli = c; myPid = player?.id || myPid; lastAuth = Date.now(); }
   return cli;
 }
 async function ensureLoginOk() {
@@ -324,8 +324,7 @@ async function runAutoVersionReview(sha) {
     const notes = [];
     const lines = [`🧪 Auto review started for \`${String(sha).slice(0, 8)}\``];
     try {
-      const auth = await login();
-      const c = new KintaraClient({ cookie: auth.cookie });
+      const { client: c } = await KintaraClient.create();
       lines.push('• auth/login OK');
       const version = await c.version();
       if (!version?.sha) throw new Error('version endpoint returned no SHA');

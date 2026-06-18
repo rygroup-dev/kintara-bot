@@ -10,7 +10,7 @@ const path = require('path');
 const { config } = require('../config');
 const { Presence } = require('../lib/presenceWs');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login, isWalletBannedError } = require('../lib/walletAuth');
+const { isWalletBannedError } = require('../lib/walletAuth');
 const gs = require('../lib/gameState');
 
 const KIND = process.argv[2] || 'tree';
@@ -120,8 +120,8 @@ async function gatherLoop(p) {
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, 'gather.log'), '');
   saveState({ phase: 'boot', queueAhead: null, region: 'world' });
-  const a = await login(); cli = new KintaraClient({ cookie: a.cookie });
-  log('GATHER BOT START kind=' + KIND + ' pid=' + a.player?.id);
+  const { client: c, player } = await KintaraClient.create(); cli = c;
+  log('GATHER BOT START kind=' + KIND + ' pid=' + player?.id);
   for (;;) {
     const p = await connectWithRetry();
     p.on('close', () => { stats.reconnects++; saveState({ phase: 'reconnect', queueAhead: null, region: p.region }); log('⚠️ presence closed -> reconnect'); });

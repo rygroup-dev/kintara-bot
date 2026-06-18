@@ -16,7 +16,7 @@ const path = require('path');
 const cp = require('child_process');
 const { config } = require('../config');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login, isWalletBannedError } = require('../lib/walletAuth');
+const { isWalletBannedError } = require('../lib/walletAuth');
 const tg = require('../lib/telegram');
 
 const ROOT = path.join(__dirname, '..');
@@ -73,7 +73,7 @@ const EVAL_MS = 600000;          // evaluasi tiap 10 menit (switch hemat)
 const MIN_RUN_MS = 1500000;      // minimal 25 menit per aktivitas sebelum boleh switch (hindari antri bolak-balik)
 
 let cli, lastAuth = 0, current = null, currentSince = 0, myPid = null;
-async function client() { if (!cli || Date.now() - lastAuth > 1500000) { const a = await login(); cli = new KintaraClient({ cookie: a.cookie }); myPid = a.player?.id || myPid; lastAuth = Date.now(); } return cli; }
+async function client() { if (!cli) { const { client: c, player } = await KintaraClient.create(); cli = c; myPid = player?.id || myPid; lastAuth = Date.now(); } return cli; }
 function saveState(data) {
   fs.writeFileSync(STATEFILE, JSON.stringify({ ...data, ts: Date.now() }, null, 2));
 }
@@ -154,7 +154,7 @@ async function decide() {
         await tg.send('⛔ Orchestrator berhenti: wallet kena ban server (`wallet_banned`), jadi login ditolak.').catch(() => {});
         process.exit(1);
       }
-      if (/cookie|401/.test(e.message || '')) lastAuth = 0;
+      if (/cookie|401/.test(e.message || '')) { cli = null; lastAuth = 0; }
     }
     await sleep(EVAL_MS);
   }

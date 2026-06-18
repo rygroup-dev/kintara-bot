@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login, isWalletBannedError } = require('../lib/walletAuth');
+const { isWalletBannedError } = require('../lib/walletAuth');
 
 const OUT = path.join(__dirname, '..', 'recon');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] DQ ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'daily-quest.log'), s + '\n'); };
@@ -19,7 +19,7 @@ const INTERVAL = 180000; // 3 menit
   fs.mkdirSync(OUT, { recursive: true });
   for (;;) {
     try {
-      if (Date.now() - lastAuth > 1800000) { const a = await login(); cli = new KintaraClient({ cookie: a.cookie }); lastAuth = Date.now(); log('auth ok'); }
+      if (!cli) { ({ client: cli } = await KintaraClient.create()); lastAuth = Date.now(); log('auth ok'); }
       const q = await cli.dailyQuestProgress();
       const dq = q?.dailyQuest || {}; const cfg = q?.dailyQuestConfig || {};
       const prog = dq.prog || {}; const claimed = dq.claimed || {};
@@ -37,7 +37,7 @@ const INTERVAL = 180000; // 3 menit
     } catch (e) {
       log('err: ' + (e.message || '').slice(0, 60));
       if (isWalletBannedError(e)) process.exit(1);
-      if (/cookie|401|Non-JSON/.test(e.message || '')) lastAuth = 0;
+      if (/cookie|401|Non-JSON/.test(e.message || '')) { cli = null; lastAuth = 0; }
     }
     await sleep(INTERVAL);
   }
