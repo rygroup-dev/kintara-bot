@@ -7,11 +7,12 @@
 // Pakai: node tools/bot-headless.js [shard=s2]
 const fs = require('fs');
 const path = require('path');
+const { config } = require('../config');
 const { Presence } = require('../lib/presenceWs');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login } = require('../lib/walletAuth');
+const { login, isWalletBannedError } = require('../lib/walletAuth');
 
-const SHARD = process.argv[2] || 's2';
+const SHARD = process.argv[2] || config.shard || 's2';
 const OUT = path.join(__dirname, '..', 'recon');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'bot.log'), s + '\n'); };
 const _thr = {};
@@ -34,6 +35,7 @@ async function connectWithRetry() {
       log('✅ presence live, region=' + p.region);
       return p;
     } catch (e) {
+      if (isWalletBannedError(e)) throw e;
       log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 60)} — retry 15s`);
       await sleep(15000);
       if (attempt % 3 === 0) { try { await freshAuth(); log('re-auth cookie'); } catch {} }
@@ -135,6 +137,7 @@ async function fishLoop(p) {
 }
 
 (async () => {
+  fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, 'bot.log'), '');
   await freshAuth();
   const me0 = await cli.me().catch(() => ({}));

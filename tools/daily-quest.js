@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login } = require('../lib/walletAuth');
+const { login, isWalletBannedError } = require('../lib/walletAuth');
 
 const OUT = path.join(__dirname, '..', 'recon');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] DQ ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'daily-quest.log'), s + '\n'); };
@@ -16,6 +16,7 @@ const INTERVAL = 180000; // 3 menit
 
 (async () => {
   let cli, lastAuth = 0;
+  fs.mkdirSync(OUT, { recursive: true });
   for (;;) {
     try {
       if (Date.now() - lastAuth > 1800000) { const a = await login(); cli = new KintaraClient({ cookie: a.cookie }); lastAuth = Date.now(); log('auth ok'); }
@@ -33,7 +34,11 @@ const INTERVAL = 180000; // 3 menit
       }
       log('day=' + dq.day + ' | ' + summary.join(' | '));
       fs.writeFileSync(path.join(OUT, 'daily-quest-state.json'), JSON.stringify({ day: dq.day, prog, claimed, ts: Date.now() }));
-    } catch (e) { log('err: ' + (e.message || '').slice(0, 60)); if (/cookie|401|Non-JSON/.test(e.message || '')) lastAuth = 0; }
+    } catch (e) {
+      log('err: ' + (e.message || '').slice(0, 60));
+      if (isWalletBannedError(e)) process.exit(1);
+      if (/cookie|401|Non-JSON/.test(e.message || '')) lastAuth = 0;
+    }
     await sleep(INTERVAL);
   }
 })().catch((e) => { log('FATAL ' + e.message); process.exit(1); });

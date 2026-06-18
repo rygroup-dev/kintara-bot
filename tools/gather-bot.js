@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ============ GATHER BOT — autopilot wood/stone/coal (Path A, headless) ============
+// ============ GATHER BOT — autopilot wood/stone/coal/metal (Path A, headless) ============
 // Connect world -> belajar node dari res_evt -> walk adjacent -> harvestNode
 // (harv->proof->harv_hit s/d felled) -> save-backpack loot -> ulang. Level
 // woodcutting/mining. Supervisor reconnect, tahan 502.
@@ -7,18 +7,32 @@
 // Pakai: node tools/gather-bot.js [kind=tree|rock] [shard=s2]
 const fs = require('fs');
 const path = require('path');
+const { config } = require('../config');
 const { Presence } = require('../lib/presenceWs');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login } = require('../lib/walletAuth');
+const { login, isWalletBannedError } = require('../lib/walletAuth');
 const gs = require('../lib/gameState');
 
 const KIND = process.argv[2] || 'tree';
-const SHARD = process.argv[3] || 's2';
+const SHARD = process.argv[3] || config.shard || 's2';
 const OUT = path.join(__dirname, '..', 'recon');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'gather.log'), s + '\n'); };
 const lt = {}; const logT = (k, m, ms = 30000) => { const n = Date.now(); if (!lt[k] || n - lt[k] > ms) { lt[k] = n; log(m); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const stats = { felled: 0, wood: 0, stone: 0, coal: 0, harvests: 0, reconnects: 0, started: Date.now() };
+const stats = {
+  felled: 0,
+  wood: 0,
+  stone: 0,
+  coal: 0,
+  metal: 0,
+  gainedWood: 0,
+  gainedStone: 0,
+  gainedCoal: 0,
+  gainedMetal: 0,
+  harvests: 0,
+  reconnects: 0,
+  started: Date.now(),
+};
 
 let cli;
 async function connectWithRetry() {
@@ -30,7 +44,11 @@ async function connectWithRetry() {
       await p.connect();
       log('✅ presence live region=' + p.region);
       return p;
-    } catch (e) { log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 50)} — retry 15s`); await sleep(15000); }
+    } catch (e) {
+      if (isWalletBannedError(e)) throw e;
+      log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 50)} — retry 15s`);
+      await sleep(15000);
+    }
   }
 }
 
@@ -43,6 +61,10 @@ async function persistLoot(loot, yld = 1) {
     bp[loot] = (Number(bp[loot]) || 0) + yld;
     const r = await gs.pushBackpack(cli, bp, st.stateSeq, []);
     stats[loot] = r?.backpack?.[loot] ?? stats[loot];
+    if (loot === 'wood') stats.gainedWood += yld;
+    if (loot === 'stone') stats.gainedStone += yld;
+    if (loot === 'coal') stats.gainedCoal += yld;
+    if (loot === 'metal') stats.gainedMetal += yld;
     return true;
   } catch (e) { logT('persist', 'persist err: ' + e.message.slice(0, 50)); return false; }
 }
@@ -67,14 +89,20 @@ async function gatherLoop(p) {
     if (!p.ready) break;
     const res = await p.harvestNode(node.kind, node.key, node.hasCoal, node.hasMetal, { maxHits: 10, hitGap: 1700 });
     stats.harvests++;
-    if (res.felled) { stats.felled++; await persistLoot(res.loot, 1); logT('fell', `🪓 felled ${node.kind} @${node.key} -> ${res.loot} (wood=${stats.wood} stone=${stats.stone} coal=${stats.coal}, felled ${stats.felled})`, 15000); }
-    fs.writeFileSync(path.join(OUT, 'gather-state.json'), JSON.stringify({ ...stats, region: p.region, ageMin: Math.round((Date.now() - stats.started) / 60000) }));
+    if (res.felled) { stats.felled++; await persistLoot(res.loot, 1); logT('fell', `🪓 felled ${node.kind} @${node.key} -> ${res.loot} (wood=${stats.wood} stone=${stats.stone} coal=${stats.coal} metal=${stats.metal}, felled ${stats.felled})`, 15000); }
+    fs.writeFileSync(path.join(OUT, 'gather-state.json'), JSON.stringify({
+      ...stats,
+      kind: KIND,
+      region: p.region,
+      ageMin: Math.round((Date.now() - stats.started) / 60000),
+    }, null, 2));
     await sleep(1500);
     if (harvested.size > 200) harvested.clear(); // reset biar bisa re-harvest (node respawn)
   }
 }
 
 (async () => {
+  fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, 'gather.log'), '');
   const a = await login(); cli = new KintaraClient({ cookie: a.cookie });
   log('GATHER BOT START kind=' + KIND + ' pid=' + a.player?.id);

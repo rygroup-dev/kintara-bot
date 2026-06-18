@@ -7,7 +7,7 @@
 Fully **headless** automation bot for [Kintara.gg](https://kintara.gg) — a Solana isometric MMO.
 **No browser required.** Sign in with your wallet, control everything from **Telegram**.
 
-🎣 Fishing · 🍳 Cooking · 🪓 Woodcutting · ⛏ Mining (stone/coal) · ⚔️ Combat · 🏦 Banking · 💰 Marketplace · 📋 Daily Quests · 🧠 Auto-Orchestrator
+🎣 Fishing · 🍳 Cooking · 🪓 Woodcutting · ⛏ Mining (stone/coal/metal) · ⚔️ Combat · 🏦 Banking · 💰 Marketplace · 📋 Daily Quests · 🧠 Auto-Orchestrator
 
 [![Node](https://img.shields.io/badge/node-%3E%3D18-43853d?logo=node.js&logoColor=white)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -38,7 +38,7 @@ After install, open your Telegram bot → `/start`:
 |---------|--------|
 | `/fish` | 🎣 Fishing + auto-cooking |
 | `/gather` | 🪓 Chop wood (woodcutting) |
-| `/mine` | ⛏ Mine stone + coal |
+| `/mine` | ⛏ Mine stone + coal + metal |
 | `/combat` | ⚔️ Hunt Wilderness mobs (combat XP) |
 | `/auto` | 🧠 Orchestrator picks the activity automatically |
 | `/stop` | ⏹️ Stop all bots |
@@ -80,7 +80,7 @@ npm install
 cp .env.example .env   # fill in WALLET_PRIVATE_KEY
 npm run fish     # fishing + cooking
 npm run gather   # wood
-npm run mine     # stone/coal
+npm run mine     # stone/coal/metal
 npm run combat   # Wilderness hunting
 npm run auto     # orchestrator
 ```

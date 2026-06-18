@@ -50,6 +50,7 @@ const config = {
   // ---- API hosts ----
   apiBase: process.env.KINTARA_API_BASE || 'https://kintara.gg',
   fanoutBase: process.env.KINTARA_FANOUT_BASE || 'https://ktra-server-b.onrender.com',
+  shard: process.env.KINTARA_SHARD || 's2',
 
   // ---- Telegram ----
   telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',

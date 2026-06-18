@@ -15,12 +15,13 @@
 // Pakai: node tools/combat-bot.js [shard=s2]
 const fs = require('fs');
 const path = require('path');
+const { config } = require('../config');
 const { Presence } = require('../lib/presenceWs');
 const { KintaraClient } = require('../lib/kintaraClient');
-const { login } = require('../lib/walletAuth');
+const { login, isWalletBannedError } = require('../lib/walletAuth');
 const bank = require('../lib/bank');
 
-const SHARD = process.argv[2] || 's2';
+const SHARD = process.argv[2] || config.shard || 's2';
 const OUT = path.join(__dirname, '..', 'recon');
 const PIDFILE = path.join(OUT, 'control', 'combatbot.pid');
 const STATEFILE = path.join(OUT, 'combat-state.json');
@@ -57,19 +58,39 @@ function saveState(extra = {}) {
 }
 
 let cli;
-let healthLeft = 5, shieldLeft = 5;   // local count guess (server authoritative)
+let healthLeft = 0, shieldLeft = 0;   // diisi dari backpack saat start (server authoritative)
 let lastPotionAt = 0;
+
+// Health potion = HoT +20/tick x5 = +100 total, DIDORONG CLIENT (consume-potion cuma
+// kurangi potion; heal sebenarnya client-side + save-hp). Headless: kita yg apply + persist.
+const HEALTH_POTION_TOTAL = 100;
+
+async function refreshPotionCounts() {
+  try {
+    const me = await cli.me(); const bp = me.backpack || {};
+    healthLeft = Number(bp.potion_health) || 0;
+    shieldLeft = Number(bp.potion_shield) || 0;
+  } catch {}
+}
 
 async function tryPotion(p, type) {
   const now = Date.now();
   if (now - lastPotionAt < 2500) return false; // rate-limit guard
+  if (type === 'potion_health' && healthLeft <= 0) return false;
+  if (type === 'potion_shield' && shieldLeft <= 0) return false;
   lastPotionAt = now;
   try {
     const r = await cli.consumePotion(type);
     if (r && r.ok !== false && !r.error) {
-      if (type === 'potion_health') { stats.potionsHealth++; healthLeft = Math.max(0, healthLeft - 1); }
-      else if (type === 'potion_shield') { stats.potionsShield++; shieldLeft = Math.max(0, shieldLeft - 1); p.shield = 5; }
-      log(`🧪 drank ${type} (hp=${p.hp})`);
+      if (type === 'potion_health') {
+        stats.potionsHealth++; healthLeft = Math.max(0, healthLeft - 1);
+        // drive HoT + persist: server percaya save-hp saat combat (combatHealRealtime)
+        p.hp = Math.min(100, (p.hp | 0) + HEALTH_POTION_TOTAL);
+        try { await cli.saveHp(p.hp); } catch {}
+      } else if (type === 'potion_shield') {
+        stats.potionsShield++; shieldLeft = Math.max(0, shieldLeft - 1); p.shield = 5;
+      }
+      log(`🧪 drank ${type} -> hp=${p.hp} (health left=${healthLeft})`);
       return true;
     }
     logT('potfail', `potion ${type} rejected: ${r?.error || 'unknown'}`);
@@ -77,15 +98,19 @@ async function tryPotion(p, type) {
   return false;
 }
 
-// HP-driven survival reaction. Returns 'retreat' if must bail.
+// HP-driven survival reaction. Returns 'retreat' if must bail, 'dead' kalau mati.
 async function survivalCheck(p) {
   const hp = p.hp | 0;
   stats.hp = hp;
   if (hp <= 0) { stats.deaths++; log('💀 HP 0 — died (loot already banked = safe)'); return 'dead'; }
-  if (hp <= RETREAT_HP) { log(`🩸 HP ${hp} <= ${RETREAT_HP} — RETREAT`); return 'retreat'; }
-  if (hp <= SHIELD_HP && shieldLeft > 0) { await tryPotion(p, 'potion_shield'); await tryPotion(p, 'potion_health'); }
-  else if (hp <= POTION_HP && healthLeft > 0) { await tryPotion(p, 'potion_health'); }
-  else if (hp <= POTION_HP && healthLeft <= 0) { log(`⚠️ HP ${hp} low & no health potions — RETREAT`); return 'retreat'; }
+  // kritis: bail ke safe camp
+  if (hp <= RETREAT_HP) {
+    if (healthLeft <= 0 && shieldLeft <= 0) { log(`🩸 HP ${hp} kritis & potion habis — RETREAT+EXIT`); return 'retreat'; }
+    log(`🩸 HP ${hp} <= ${RETREAT_HP} — RETREAT (heal di safe camp)`); return 'retreat';
+  }
+  // low: pop shield dulu kalau ada, lalu heal
+  if (hp <= SHIELD_HP && shieldLeft > 0 && (p.shield | 0) <= 0) await tryPotion(p, 'potion_shield');
+  if (hp <= POTION_HP && healthLeft > 0) await tryPotion(p, 'potion_health');
   return 'ok';
 }
 
@@ -107,25 +132,31 @@ async function enterWild(p) {
   log(`✅ masuk wild region=${p.region} tile=${JSON.stringify(p.wildTile())}`);
   // baseline combat XP (playerStats.skillXp.combat — bukan me())
   try { const st = await cli.playerStats(p.myId); stats.combatStart = st?.skillXp?.combat ?? 0; stats.combatNow = stats.combatStart; log(`baseline combat XP=${stats.combatStart}`); } catch {}
+  await refreshPotionCounts();
+  log(`🧪 potions: health=${healthLeft} shield=${shieldLeft}`);
   return true;
 }
 
 async function retreatToSafe(p) {
   stats.retreats++;
   const sc = wildWorld(SAFE_CAMP.col, SAFE_CAMP.row);
-  log('🏃 retreat ke safe camp...');
+  log(`🏃 retreat ke safe camp (hp=${p.hp})...`);
   await p.walkTo(sc.x, sc.z, { maxSec: 30 });
-  await sleep(2000);
-  // recover dgn health potion sampai HP aman atau habis
-  for (let i = 0; i < 5 && p.hp < 70 && healthLeft > 0; i++) { await tryPotion(p, 'potion_health'); await sleep(3000); }
-  if (p.hp < RETREAT_HP + 10) {
-    log('🚪 exit ke Mainland (HP belum aman)');
+  await sleep(1500);
+  // heal pakai health potion sampai HP aman (>=80) atau potion habis.
+  // tryPotion sekarang drive heal +100 + save-hp, jadi 1 potion biasanya cukup.
+  for (let i = 0; i < 8 && p.hp < 80 && healthLeft > 0; i++) {
+    await tryPotion(p, 'potion_health');
+    await sleep(2600); // hormati rate-limit potion
+  }
+  if (healthLeft <= 0 && p.hp <= RETREAT_HP) {
+    log('🚪 potion habis & HP rendah — EXIT ke Mainland (sesi combat selesai aman)');
     p.setRegion('world', NORTH_PORTAL.x, NORTH_PORTAL.z + 1);
     stats.region = 'world';
     await sleep(3000);
     return 'exited';
   }
-  log(`🛡️ recovered hp=${p.hp}, lanjut hunt`);
+  log(`🛡️ recovered hp=${p.hp} (health left=${healthLeft}), lanjut hunt`);
   return 'recovered';
 }
 
@@ -198,11 +229,16 @@ async function connectWithRetry() {
       await p.connect();
       log('✅ presence live region=' + p.region);
       return p;
-    } catch (e) { log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 60)} — retry 15s`); await sleep(15000); }
+    } catch (e) {
+      if (isWalletBannedError(e)) throw e;
+      log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 60)} — retry 15s`);
+      await sleep(15000);
+    }
   }
 }
 
 (async () => {
+  fs.mkdirSync(OUT, { recursive: true });
   try { fs.writeFileSync(LOGFILE, ''); } catch {}
   try { fs.mkdirSync(path.dirname(PIDFILE), { recursive: true }); fs.writeFileSync(PIDFILE, JSON.stringify({ pid: process.pid, started: Date.now() })); } catch {}
   process.on('exit', () => { try { fs.unlinkSync(PIDFILE); } catch {} });
