@@ -51,10 +51,11 @@ async function ensureLoginOk() {
 function readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } }
 
 // Pilih shard yang BISA dimasuki wallet ini (gate=ok) dgn queue paling kecil.
-// Build 1ce1fc76 nambah entry-gate /api/auth/gate-check (membership/level/$KINS),
-// jadi daftar restricted gak lagi hardcoded — kita probe live tiap shard biar
-// otomatis ngikut perubahan peta server. RESTRICTED lama dipakai cuma fallback
-// kalau gate-check gak kejangkau.
+// Build 1ce1fc76 nambah entry-gate /api/auth/gate-check (membership/level/$KINS).
+// Akun ini belum lvl 20 & non-membership -> s1-s3 selalu ditolak. Maka pasang
+// FLOOR keras: cuma pilih shard >= KINTARA_MIN_SHARD (default 4). Gate-check tetap
+// jadi lapis kedua biar otomatis ngikut perubahan peta server.
+const MIN_SHARD = Math.max(1, parseInt(process.env.KINTARA_MIN_SHARD || '4', 10) || 4);
 let _bestShardCache = { ts: 0, shard: null };
 async function shardGateOk(c, id) {
   try {
@@ -73,10 +74,14 @@ async function pickBestShard(force = false) {
     const r = await c.servers();
     const list = (r.servers || []).filter((x) => x && x.id != null);
     if (!list.length) return null;
-    // urutkan dulu by queue terkecil lalu non-full -> probe gate dari yg paling menarik.
-    const ranked = [...list].sort((a, b) => (Number(a.queueLength || 0) - Number(b.queueLength || 0)) || (a.full === b.full ? 0 : a.full ? 1 : -1));
-    // override manual: lewati gate-check (mis. udah premium / lvl 20)
-    if (process.env.KINTARA_ALLOW_LOW_SERVERS === '1') {
+    // override manual: lewati floor + gate-check (mis. udah premium / lvl 20)
+    const bypass = process.env.KINTARA_ALLOW_LOW_SERVERS === '1';
+    // FLOOR: buang s1..s(MIN_SHARD-1) kecuali bypass.
+    const eligible = bypass ? list : list.filter((x) => Number(x.id) >= MIN_SHARD);
+    const base = eligible.length ? eligible : list;
+    // urutkan by queue terkecil lalu non-full -> probe gate dari yg paling menarik.
+    const ranked = [...base].sort((a, b) => (Number(a.queueLength || 0) - Number(b.queueLength || 0)) || (a.full === b.full ? 0 : a.full ? 1 : -1));
+    if (bypass) {
       const shard0 = 's' + ranked[0].id;
       _bestShardCache = { ts: Date.now(), shard: shard0 };
       return shard0;
@@ -90,10 +95,8 @@ async function pickBestShard(force = false) {
         return shard;
       }
     }
-    // semua gate nolak / gak kejangkau -> fallback ke heuristik lama (skip s1-s3)
-    const RESTRICTED = new Set([1, 2, 3]);
-    const pool = ranked.filter((x) => !RESTRICTED.has(Number(x.id)));
-    const best = (pool.length ? pool : ranked)[0];
+    // semua gate nolak / gak kejangkau -> fallback: shard >= floor, queue terkecil
+    const best = ranked[0];
     const shard = 's' + best.id;
     _bestShardCache = { ts: Date.now(), shard };
     return shard;

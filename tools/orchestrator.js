@@ -78,23 +78,29 @@ function saveState(data) {
   fs.writeFileSync(STATEFILE, JSON.stringify({ ...data, ts: Date.now() }, null, 2));
 }
 
-// Pilih shard yg BISA dimasuki wallet (gate=ok) dgn queue terkecil. Build baru
-// nambah /api/auth/gate-check (membership/level/$KINS); jangan hardcode shard.
+// Pilih shard yg BISA dimasuki wallet (gate=ok) dgn queue terkecil. Akun belum
+// lvl 20 & non-membership -> s1-s3 ditolak. FLOOR keras: shard >= KINTARA_MIN_SHARD
+// (default 4). gate-check jadi lapis kedua biar ngikut perubahan peta server.
+const ORCH_MIN_SHARD = Math.max(1, parseInt(process.env.KINTARA_MIN_SHARD || '4', 10) || 4);
 let _shardCache = { ts: 0, shard: null };
 async function pickShard() {
   if (Date.now() - _shardCache.ts < 120000 && _shardCache.shard) return _shardCache.shard;
   try {
     const c = await client();
     const r = await c.servers();
-    const ranked = (r.servers || []).filter((x) => x && x.id != null)
+    const bypass = process.env.KINTARA_ALLOW_LOW_SERVERS === '1';
+    const list = (r.servers || []).filter((x) => x && x.id != null);
+    const eligible = bypass ? list : list.filter((x) => Number(x.id) >= ORCH_MIN_SHARD);
+    const ranked = (eligible.length ? eligible : list)
       .sort((a, b) => (Number(a.queueLength || 0) - Number(b.queueLength || 0)) || (a.full === b.full ? 0 : a.full ? 1 : -1));
-    if (process.env.KINTARA_ALLOW_LOW_SERVERS !== '1') {
+    if (!bypass) {
       for (const sv of ranked) {
         let ok = null;
         try { const g = await c.get(`/api/auth/gate-check?shard=${Number(sv.id) | 0}`); ok = g && g.gate === 'ok'; }
         catch (e) { ok = e && e.status === 403 ? false : null; }
         if (ok === true) { _shardCache = { ts: Date.now(), shard: 's' + sv.id }; return _shardCache.shard; }
       }
+      if (ranked[0]) { _shardCache = { ts: Date.now(), shard: 's' + ranked[0].id }; return _shardCache.shard; }
     } else if (ranked[0]) { _shardCache = { ts: Date.now(), shard: 's' + ranked[0].id }; return _shardCache.shard; }
   } catch {}
   return config.shard || 's4';
