@@ -38,7 +38,7 @@ async function ensureLoginOk() {
     return null;
   } catch (e) {
     if (isWalletBannedError(e)) {
-      return '⛔ Wallet ini kena ban server (`wallet_banned`). Bot tidak bisa login atau jalan dengan wallet ini. Coba cek status akun/wallet di game atau hubungi support resmi.';
+      return '⛔ This wallet is banned by the server (`wallet_banned`). The bot cannot log in or run with this wallet. Please check the in-game account status or contact official support.';
     }
     throw e;
   }
@@ -207,7 +207,7 @@ async function ensureDesiredServices() {
     if (name === 'gather') {
       fs.writeFileSync(spec.pidfile, JSON.stringify({ pid, kind: meta.kind || 'tree', started: Date.now() }));
     }
-    await tg.send(`♻️ ${spec.label} hidup lagi otomatis (pid ${pid})`).catch(() => {});
+    await tg.send(`♻️ ${spec.label} auto-restarted (pid ${pid})`).catch(() => {});
   }
 }
 function readVersionState() { return readJson(VERSION_STATEFILE) || {}; }
@@ -241,9 +241,9 @@ async function maybeNotifyVersionChange() {
         stopped.combat ? 'combat' : null,
       ].filter(Boolean);
       const stopLine = stoppedNames.length
-        ? `\n🛑 Automation dipause otomatis: ${stoppedNames.join(', ')}`
-        : '\n🛑 Tidak ada bot aktif saat update terdeteksi.';
-      await tg.send(`🆕 Game update terdeteksi\nold: \`${prev.sha.slice(0, 8)}\`\nnew: \`${current.sha.slice(0, 8)}\`${stopLine}\nCek bot / API dulu sebelum jalanin lagi.`).catch(() => {});
+        ? `\n🛑 Automation auto-paused: ${stoppedNames.join(', ')}`
+        : '\n🛑 No active bots were running when the update was detected.';
+      await tg.send(`🆕 Game update detected\nold: \`${prev.sha.slice(0, 8)}\`\nnew: \`${current.sha.slice(0, 8)}\`${stopLine}\nPlease review the bot / API before starting automation again.`).catch(() => {});
     }
   } catch {}
 }
@@ -266,8 +266,8 @@ async function hStatus() {
         ? fmtAgeMin(procAgeMin(CPIDFILE))
         : null;
   const lines = [
-    '🤖 <b>Status Bot Kintara</b>',
-    `🎯 <b>Aktif:</b> ${activeLabel}${activeAge ? ` • ${activeAge}` : ''}`,
+    '🤖 <b>Kintara Bot Status</b>',
+    `🎯 <b>Active:</b> ${activeLabel}${activeAge ? ` • ${activeAge}` : ''}`,
     `🧠 Auto ${or ? '🟢 ON' : '🔴 OFF'} | 🎣 Fish ${fr ? '🟢' : '🔴'} | ${gLbl} ${gr ? '🟢' : '🔴'} | ⚔️ Combat ${cb ? '🟢' : '🔴'}`,
   ];
   if (or && orch) {
@@ -308,10 +308,10 @@ function fmtSpinnerReady(lastMs) {
   const COOLDOWN = 12 * 3600 * 1000;
   const next = (Number(lastMs) || 0) + COOLDOWN;
   const left = next - Date.now();
-  if (left <= 0) return '🎡 Spinner: ✅ FREE SPIN READY — ketik /spinner';
+  if (left <= 0) return '🎡 Spinner: ✅ FREE SPIN READY — type /spinner';
   const h = Math.floor(left / 3600000);
   const m = Math.round((left % 3600000) / 60000);
-  return `🎡 Spinner: ⏳ ready dalam ${h}j ${m}m`;
+  return `🎡 Spinner: ⏳ ready in ${h}h ${m}m`;
 }
 async function hSkills() {
   const c = await client(); const st = await c.playerStats(myPid).catch(() => ({}));
@@ -322,7 +322,7 @@ async function hSkills() {
     spinLine = fmtSpinnerReady(me?.meta?.dailySpinnerLastMs);
   } catch { spinLine = '🎡 Spinner: status ?'; }
   const avg = st.avg;
-  const unlock = (Number(avg) || 0) >= 5 ? '✅ unlocked (avg≥5)' : `🔒 butuh avg 5 (now ${avg ?? '?'})`;
+  const unlock = (Number(avg) || 0) >= 5 ? '✅ unlocked (avg≥5)' : `🔒 requires avg 5 (now ${avg ?? '?'})`;
   return `📊 <b>Skills</b> (avg lvl ${avg ?? '?'})\n` +
     `⚔️ combat: ${xp.combat ?? 0}\n🪓 woodcutting: ${xp.woodcutting ?? 0}\n⛏ mining: ${xp.mining ?? 0}\n` +
     `🎣 fishing: ${xp.fishing ?? 0}\n🍳 cooking: ${xp.cooking ?? 0}\n🔨 smithing: ${xp.smithing ?? 0}\n` +
@@ -336,7 +336,7 @@ async function hBalance() {
   let tok = '';
   try { const t = await c.tokenBlimpStats(); tok = `\n🪙 $KINS: $${t.priceUsd} (${t.marketCapLabel})`; } catch {}
   const invLine = invItems.length ? invItems.join(' | ') : '-';
-  return `💰 <b>Saldo</b>\ngold: ${bp.gold || 0}\n🎣 fish: ${bp.fish || 0} | 🍳 cooked: ${bp.cooked_fish_meat || 0}\n🪵 wood: ${bp.wood || 0} | 🪨 stone: ${bp.stone || 0} | coal: ${bp.coal || 0} | metal: ${bp.metal || 0}\n🎒 inv ${(bp.invSlots || []).filter(Boolean).length}/24\n📦 items: ${invLine}${tok}`;
+  return `💰 <b>Balance</b>\ngold: ${bp.gold || 0}\n🎣 fish: ${bp.fish || 0} | 🍳 cooked: ${bp.cooked_fish_meat || 0}\n🪵 wood: ${bp.wood || 0} | 🪨 stone: ${bp.stone || 0} | coal: ${bp.coal || 0} | metal: ${bp.metal || 0}\n🎒 inv ${(bp.invSlots || []).filter(Boolean).length}/24\n📦 items: ${invLine}${tok}`;
 }
 async function hSpinner() {
   const authErr = await ensureLoginOk();
@@ -347,7 +347,7 @@ async function hSpinner() {
     const st = await c.playerStats(myPid);
     const avg = Number(st?.avg);
     if (Number.isFinite(avg) && avg < 5) {
-      return `🔒 Spinner butuh avg level ≥ 5 (sekarang ${avg}). Grind dulu bang.`;
+      return `🔒 Spinner requires avg level ≥ 5 (current ${avg}). Grind a bit more first.`;
     }
   } catch {}
   // Free daily spin
@@ -357,12 +357,12 @@ async function hSpinner() {
   } catch (e) {
     const m = (e.message || '').toLowerCase();
     if (/cooldown|12h|already|wait|next|timer/.test(m)) {
-      return `⏳ Free spin belum siap (cooldown 12 jam). Coba lagi nanti.`;
+      return `⏳ Free spin is not ready yet (12h cooldown). Try again later.`;
     }
-    return `❌ Spin gagal: ${(e.message || '').slice(0, 120)}`;
+    return `❌ Spin failed: ${(e.message || '').slice(0, 120)}`;
   }
   if (!res || res.ok === false) {
-    return `❌ Spin ditolak server: ${JSON.stringify(res || {}).slice(0, 120)}`;
+    return `❌ Spin rejected by server: ${JSON.stringify(res || {}).slice(0, 120)}`;
   }
   const grant = res.grant || {};
   const bp = res.backpack || {};
@@ -373,9 +373,9 @@ async function hSpinner() {
     const tk = t?.ticker || {};
     if (tk.priceUsd) tickerLine = `\n💵 Paid spin: $${tk.paidSpinUsd || 3} (~${tk.tokenSymbol || '$KINS'} @ $${Number(tk.priceUsd).toFixed(6)})`;
   } catch {}
-  return `🎡 <b>Free Spin!</b>\n${prizeIcon} Menang: <b>${grant.type || '?'}</b> x${grant.amount ?? '?'} (segment #${res.winIndex ?? '?'})\n` +
+  return `🎡 <b>Free Spin!</b>\n${prizeIcon} Won: <b>${grant.type || '?'}</b> x${grant.amount ?? '?'} (segment #${res.winIndex ?? '?'})\n` +
     `🎒 Backpack: 🪵 ${bp.wood || 0} | 🪨 ${bp.stone || 0} | ⚫ ${bp.coal || 0} | 🔩 ${bp.metal || 0} | 🪙 ${bp.gold || 0}` +
-    `${tickerLine}\n\n<i>Free spin reset tiap 12 jam.</i>`;
+    `${tickerLine}\n\n<i>Free spin resets every 12 hours.</i>`;
 }
 
 const MARKET_ITEMS = [
@@ -396,7 +396,7 @@ async function hMarket() {
   const authErr = await ensureLoginOk();
   if (authErr) return authErr;
   const c = await client();
-  const lines = ['🛍 <b>Marketplace — Harga Live</b>', ''];
+  const lines = ['🛍 <b>Marketplace — Live Prices</b>', ''];
   for (const [itemType, label] of MARKET_ITEMS) {
     if (itemType === 'gold') continue;
     try {
@@ -409,7 +409,7 @@ async function hMarket() {
   }
   let kins = '?';
   try { const t = await c.tokenBlimpStats(); kins = `$${Number(t.priceUsd).toFixed(6)}`; } catch {}
-  lines.push('', `🪙 $KINS: <b>${kins}</b>`, '', '<i>Pilih aksi — Sell (gold/$KINS) atau Buy dari listing live.</i>');
+  lines.push('', `🪙 $KINS: <b>${kins}</b>`, '', '<i>Choose an action — Sell (gold/$KINS) or Buy from live listings.</i>');
   mkReset();
   await tg.send(lines.join('\n'), {
     buttons: [[{ text: '💰 SELL', data: 'mk:sell' }, { text: '🛒 BUY', data: 'mk:buy' }]],
@@ -429,78 +429,78 @@ async function mkShowInventory(ctx) {
     }
   });
   if (!rows.length) {
-    await tg.editMessage(ctx.chatId, ctx.messageId, '🎒 Nggak ada item di inventory slot yang bisa dijual.\n\n<i>Resource bulk (stone/wood/fish) belum bisa di-list lewat Marketplace — harus jadi item di slot dulu.</i>', { buttons: [[{ text: '⬅️ Kembali', data: 'mk:back' }]] });
+    await tg.editMessage(ctx.chatId, ctx.messageId, '🎒 There are no inventory-slot items available to sell.\n\n<i>Bulk resources (stone/wood/fish) cannot be listed directly on the Marketplace yet — they must exist as slot items first.</i>', { buttons: [[{ text: '⬅️ Back', data: 'mk:back' }]] });
     return;
   }
   const grid = [];
   for (let i = 0; i < rows.length; i += 2) grid.push(rows.slice(i, i + 2));
-  grid.push([{ text: '⬅️ Kembali', data: 'mk:back' }]);
+  grid.push([{ text: '⬅️ Back', data: 'mk:back' }]);
   mkSession = { mode: 'sell', step: 'pick-item' };
-  await tg.editMessage(ctx.chatId, ctx.messageId, '💰 <b>SELL</b> — pilih item:', { buttons: grid });
+  await tg.editMessage(ctx.chatId, ctx.messageId, '💰 <b>SELL</b> — choose an item:', { buttons: grid });
 }
 async function mkPickCurrency(slotIdx, ctx) {
   const c = await client();
   const me = await c.me(); const sl = (me.backpack?.invSlots || [])[Number(slotIdx)];
-  if (!sl || !sl.t) { await tg.editMessage(ctx.chatId, ctx.messageId, '⚠️ Slot kosong, pilih ulang.', { buttons: [[{ text: '⬅️ Kembali', data: 'mk:sell' }]] }); return; }
+  if (!sl || !sl.t) { await tg.editMessage(ctx.chatId, ctx.messageId, '⚠️ Slot is empty, please choose again.', { buttons: [[{ text: '⬅️ Back', data: 'mk:sell' }]] }); return; }
   mkSession = { mode: 'sell', slotIndex: Number(slotIdx), item: sl.t, step: 'pick-currency' };
   await tg.editMessage(ctx.chatId, ctx.messageId,
-    `💰 <b>SELL ${ITEM_LABEL[sl.t] || sl.t}</b> (punya ${sl.n || 1})\nJual pakai mata uang apa?`,
-    { buttons: [[{ text: '🪙 Gold', data: 'mk:cur:gold' }, { text: '🪙 $KINS', data: 'mk:cur:token' }], [{ text: '⬅️ Kembali', data: 'mk:sell' }]] });
+    `💰 <b>SELL ${ITEM_LABEL[sl.t] || sl.t}</b> (you have ${sl.n || 1})\nWhich currency do you want to use?`,
+    { buttons: [[{ text: '🪙 Gold', data: 'mk:cur:gold' }, { text: '🪙 $KINS', data: 'mk:cur:token' }], [{ text: '⬅️ Back', data: 'mk:sell' }]] });
 }
 async function mkAskQtyPrice(currency, ctx) {
-  if (!mkSession || !mkSession.item) { await tg.send('⚠️ Sesi habis, /market lagi ya.'); return; }
+  if (!mkSession || !mkSession.item) { await tg.send('⚠️ Session expired, please run /market again.'); return; }
   mkSession = { mode: 'sell', item: mkSession.item, slotIndex: mkSession.slotIndex, currency, step: 'await-input' };
   const unit = currency === 'token' ? 'USD (total listing)' : 'gold (per unit)';
   await tg.editMessage(ctx.chatId, ctx.messageId,
     `💰 <b>SELL ${ITEM_LABEL[mkSession.item] || mkSession.item}</b> — ${currency === 'token' ? '$KINS' : 'Gold'}\n\n` +
-    `Ketik: <code>qty harga</code>\nContoh: <code>1 25</code>\n\n• qty = jumlah\n• harga = ${unit}`,
-    { buttons: [[{ text: '❌ Batal', data: 'mk:back' }]] });
+    `Type: <code>qty price</code>\nExample: <code>1 25</code>\n\n• qty = quantity\n• price = ${unit}`,
+    { buttons: [[{ text: '❌ Cancel', data: 'mk:back' }]] });
 }
 
 async function mkSubmitListing(text) {
   const m = text.trim().split(/\s+/);
   const qty = parseInt(m[0], 10); const price = Number(m[1]);
   if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) {
-    return '⚠️ Format salah. Ketik: <code>qty harga</code> (contoh <code>1 25</code>).';
+    return '⚠️ Invalid format. Type: <code>qty price</code> (example <code>1 25</code>).';
   }
   const { item, currency, slotIndex } = mkSession;
   const c = await client();
   const me = await c.me(); const sl = (me.backpack?.invSlots || [])[slotIndex];
-  if (!sl || sl.t !== item) { mkReset(); return '⚠️ Item di slot berubah, /market lagi ya.'; }
+  if (!sl || sl.t !== item) { mkReset(); return '⚠️ The item in that slot changed. Please run /market again.'; }
   const have = sl.n || 1;
-  if (have < qty) { mkReset(); return `⚠️ Stok kurang: punya ${have} ${ITEM_LABEL[item] || item}, mau jual ${qty}.`; }
+  if (have < qty) { mkReset(); return `⚠️ Not enough stock: you have ${have} ${ITEM_LABEL[item] || item}, but tried to sell ${qty}.`; }
   const payload = { itemType: item, slotKind: 'inv', slotIndex, quantity: qty, currency };
   if (currency === 'token') payload.priceUsd = price; else payload.priceGold = price;
   try {
     const r = await c.marketplaceSell(payload);
     mkReset();
-    if (r && r.ok === false) return `❌ Listing ditolak: ${JSON.stringify(r).slice(0, 120)}`;
+    if (r && r.ok === false) return `❌ Listing rejected: ${JSON.stringify(r).slice(0, 120)}`;
     const curLabel = currency === 'token' ? `$${price} (≈$KINS)` : `${price}g/unit`;
     return `✅ <b>Listed!</b>\n${ITEM_LABEL[item] || item} x${qty} @ ${curLabel}\n\n<i>${currency === 'token' ? '$KINS masuk wallet pas ada buyer (95% kamu / 5% treasury).' : 'Dibayar gold pas ada buyer.'}</i>`;
   } catch (e) {
     mkReset();
     const msg = (e.message || '').toLowerCase();
-    if (msg.includes('seller_skill_too_low')) return '🔒 Level skill kamu belum cukup buat jual item ini di Marketplace. Grind dulu bang.';
-    if (msg.includes('bad_slot')) return '⚠️ Resource bulk nggak bisa di-list langsung — cuma item di inv slot.';
-    return `❌ Gagal listing: ${(e.message || '').slice(0, 120)}`;
+    if (msg.includes('seller_skill_too_low')) return '🔒 Your skill level is not high enough to sell this item on the Marketplace yet.';
+    if (msg.includes('bad_slot')) return '⚠️ Bulk resources cannot be listed directly — only inventory-slot items can be sold.';
+    return `❌ Listing failed: ${(e.message || '').slice(0, 120)}`;
   }
 }
 async function mkShowBuy(ctx) {
   const c = await client();
   let arr = [];
   try { const Lst = await c.marketplaceListings({ limit: 12 }); arr = Lst.listings || Lst.items || Lst.data || []; } catch (e) {
-    await tg.editMessage(ctx.chatId, ctx.messageId, `⚠️ Gagal ambil listing: ${e.message.slice(0, 50)}`, { buttons: [[{ text: '⬅️ Kembali', data: 'mk:back' }]] });
+    await tg.editMessage(ctx.chatId, ctx.messageId, `⚠️ Failed to load listings: ${e.message.slice(0, 50)}`, { buttons: [[{ text: '⬅️ Back', data: 'mk:back' }]] });
     return;
   }
-  if (!arr.length) { await tg.editMessage(ctx.chatId, ctx.messageId, '🛒 Belum ada listing aktif.', { buttons: [[{ text: '⬅️ Kembali', data: 'mk:back' }]] }); return; }
+  if (!arr.length) { await tg.editMessage(ctx.chatId, ctx.messageId, '🛒 There are no active listings yet.', { buttons: [[{ text: '⬅️ Back', data: 'mk:back' }]] }); return; }
   const lines = ['🛒 <b>BUY — Listing Live</b>', ''];
   for (const x of arr.slice(0, 12)) {
     const it = x.itemType || x.item; const lbl = ITEM_LABEL[it] || it;
     if (x.currency === 'token' || x.currency === 'kins') lines.push(`${lbl} x${x.quantity} — <b>$${x.priceUsd ?? '?'}</b> ($KINS) • ${x.sellerName || '?'}`);
     else lines.push(`${lbl} x${x.quantity} — <b>${x.priceGold ?? '?'}g</b> • ${x.sellerName || '?'}`);
   }
-  lines.push('', '<i>⚠️ Beli listing $KINS butuh sign tx on-chain dari wallet — lakukan di web game. Listing gold dibeli in-game.</i>');
-  await tg.editMessage(ctx.chatId, ctx.messageId, lines.join('\n'), { buttons: [[{ text: '⬅️ Kembali', data: 'mk:back' }]] });
+  lines.push('', '<i>⚠️ Buying a $KINS listing requires an on-chain wallet signature — complete that in the web game. Gold listings are purchased in-game.</i>');
+  await tg.editMessage(ctx.chatId, ctx.messageId, lines.join('\n'), { buttons: [[{ text: '⬅️ Back', data: 'mk:back' }]] });
 }
 
 async function onMarketCallback(data, ctx) {
@@ -510,7 +510,7 @@ async function onMarketCallback(data, ctx) {
   if (rest === 'buy') return mkShowBuy(ctx);
   if (rest === 'back') {
     mkReset();
-    return tg.editMessage(ctx.chatId, ctx.messageId, '🛍 <b>Marketplace</b> — pilih aksi:', { buttons: [[{ text: '💰 SELL', data: 'mk:sell' }, { text: '🛒 BUY', data: 'mk:buy' }]] });
+    return tg.editMessage(ctx.chatId, ctx.messageId, '🛍 <b>Marketplace</b> — choose an action:', { buttons: [[{ text: '💰 SELL', data: 'mk:sell' }, { text: '🛒 BUY', data: 'mk:buy' }]] });
   }
   if (rest.startsWith('itm:')) return mkPickCurrency(rest.slice(4), ctx);
   if (rest.startsWith('cur:')) return mkAskQtyPrice(rest.slice(4), ctx);
@@ -527,7 +527,7 @@ async function onMarketText(text) {
 async function hQuest() {
   const c = await client(); const q = await c.dailyQuestProgress().catch(() => ({}));
   const dq = q?.dailyQuest || {}; const cfg = q?.dailyQuestConfig || {};
-  if (!(cfg.quests || []).length) return `📋 <b>Daily Quest</b> (${dq.day || '?'})\n(belum ada quest hari ini)`;
+  if (!(cfg.quests || []).length) return `📋 <b>Daily Quest</b> (${dq.day || '?'})\n(no quests available today)`;
   const lines = (cfg.quests || []).map((quest) => {
     const pr = (dq.prog || {})[quest.id] || 0; const cl = (dq.claimed || {})[quest.id];
     return `${cl ? '✅' : pr >= quest.target ? '🎁' : '▫️'} ${quest.label} — ${pr}/${quest.target} (${quest.rewardXpSpreadTotal}XP)`;
@@ -600,43 +600,43 @@ async function hDiag() {
 async function hStartFish() {
   const authErr = await ensureLoginOk();
   if (authErr) return authErr;
-  if (gatherPid() || combatPid() || pidOf(OPIDFILE)) return '⚠️ Bot lain ON — /stop dulu (1 akun = 1 aktivitas).';
-  if (botPid()) return '🎣 Fishing bot udah ON.';
+  if (gatherPid() || combatPid() || pidOf(OPIDFILE)) return '⚠️ Another bot is already running — use /stop first (1 account = 1 activity).';
+  if (botPid()) return '🎣 Fishing bot is already running.';
   replaceMainDesired('fish', {});
   const pid = spawnBot('bot-headless.js', [config.shard || 's2'], PIDFILE);
-  return `🎣 Fishing bot START (pid ${pid}). Antri ~10min lalu grind+cook. Cek /status.`;
+  return `🎣 Fishing bot STARTED (pid ${pid}). Queue time is about ~10 minutes, then it will fish and cook automatically. Check /status.`;
 }
 async function hStartGather(args) {
   const authErr = await ensureLoginOk();
   if (authErr) return authErr;
-  if (botPid() || combatPid() || pidOf(OPIDFILE)) return '⚠️ Bot lain ON — /stop dulu (1 akun = 1 aktivitas).';
+  if (botPid() || combatPid() || pidOf(OPIDFILE)) return '⚠️ Another bot is already running — use /stop first (1 account = 1 activity).';
   const kind = (args[0] === 'rock' || args[0] === 'stone' || args[0] === 'coal' || args[0] === 'mine') ? 'rock' : 'tree';
-  const lbl = kind === 'rock' ? '⛏ mining stone/coal/metal' : '🪓 chop wood';
+  const lbl = kind === 'rock' ? '⛏ mining stone/coal/metal' : '🪓 woodcutting';
   const running = gatherPid(); const cur = readJson(GPIDFILE);
-  if (running && cur?.kind === kind) return `${lbl} udah ON.`;
+  if (running && cur?.kind === kind) return `${lbl} is already running.`;
   if (running) { try { process.kill(running, 'SIGKILL'); } catch {} try { fs.unlinkSync(GPIDFILE); } catch {} } // switch kind
   replaceMainDesired('gather', { kind });
   const pid = spawnBot('gather-bot.js', [kind, config.shard || 's2'], GPIDFILE);
   fs.writeFileSync(GPIDFILE, JSON.stringify({ pid, kind, started: Date.now() })); // simpan kind
-  return `${lbl} START (pid ${pid})${running ? ' [switch dari ' + (cur?.kind || '?') + ']' : ''}. Antri ~10min. Cek /status.`;
+  return `${lbl} STARTED (pid ${pid})${running ? ` [switched from ${cur?.kind || '?'}]` : ''}. Queue time is about ~10 minutes. Check /status.`;
 }
 async function hAuto() {
   const authErr = await ensureLoginOk();
   if (authErr) return authErr;
-  if (botPid() || gatherPid() || combatPid()) return '⚠️ Bot lain ON — /stop dulu sebelum nyalain orchestrator.';
-  if (pidOf(OPIDFILE)) return '🧠 Orchestrator udah ON.';
+  if (botPid() || gatherPid() || combatPid()) return '⚠️ Another bot is already running — use /stop before starting the orchestrator.';
+  if (pidOf(OPIDFILE)) return '🧠 Orchestrator is already running.';
   replaceMainDesired('auto', {});
   const pid = spawnBot('orchestrator.js', [], OPIDFILE);
-  return `🧠 Orchestrator START (pid ${pid}) — auto-pilih fishing/gather by goal. /stop utk matikan.`;
+  return `🧠 Orchestrator STARTED (pid ${pid}) — it will choose fishing/gather automatically based on goals. Use /stop to turn it off.`;
 }
 async function hStartCombat() {
   const authErr = await ensureLoginOk();
   if (authErr) return authErr;
-  if (botPid() || gatherPid() || pidOf(OPIDFILE)) return '⚠️ Bot lain ON — /stop dulu (1 akun = 1 aktivitas).';
-  if (combatPid()) return '⚔️ Combat bot udah ON.';
+  if (botPid() || gatherPid() || pidOf(OPIDFILE)) return '⚠️ Another bot is already running — use /stop first (1 account = 1 activity).';
+  if (combatPid()) return '⚔️ Combat bot is already running.';
   replaceMainDesired('combat', {});
   const pid = spawnBot('combat-bot.js', [config.shard || 's2'], CPIDFILE);
-  return `⚔️ Combat bot START (pid ${pid}).\n🏦 Bank dulu (safety) → masuk Wilderness → hunt zombie.\n🛡️ Auto-potion + retreat saat HP kritis. Antri ~10min. Cek /status.\n\n<i>⚠️ Wilderness = PvP risk. Loot udah di-bank = aman walau mati.</i>`;
+  return `⚔️ Combat bot STARTED (pid ${pid}).\n🏦 It will bank first for safety, then enter the Wilderness and hunt zombies.\n🛡️ Auto-potion and retreat are enabled when HP gets critical. Queue time is about ~10 minutes. Check /status.\n\n<i>⚠️ Wilderness is PvP risk. Banked loot stays safe even if you die.</i>`;
 }
 function hStop() {
   let msg = [];
@@ -645,13 +645,13 @@ function hStop() {
     const pid = stopPidfile(pf);
     if (pid) msg.push(`🛑 ${name} STOP (pid ${pid})`);
   }
-  return msg.length ? msg.join('\n') : '🔴 Semua bot udah OFF.';
+  return msg.length ? msg.join('\n') : '🔴 All bots are already OFF.';
 }
 function hHelp() {
-  return `🤖 <b>Kintara Bot — Perintah</b>\n` +
-    `/status — status bot & inventory\n/skills — XP & level skill\n/balance — gold/$KINS/resource\n/market — harga marketplace\n/version — versi game saat ini\n/quest — daily quest\n/spinner — 🎡 free spin wheel (12 jam)\n/diag — auth, queue, tutorial, process\n` +
-    `/fish — fishing + cooking\n/gather — chop wood 🪓\n/mine — mining stone/coal/metal ⛏\n/combat — hunt zombie Wilderness ⚔️\n/auto — orchestrator pilih otomatis 🧠\n/stop — STOP semua\n/help — bantuan\n\n` +
-    `<i>1 akun = 1 aktivitas (lebih aman anti-cheat). Combat = bank-first + auto-survival.</i>`;
+  return `🤖 <b>Kintara Bot — Commands</b>\n` +
+    `/status — bot status & inventory\n/skills — skill XP & levels\n/balance — gold/$KINS/resources\n/market — marketplace prices & actions\n/version — current game version\n/quest — daily quests\n/spinner — 🎡 free spin wheel (12h)\n/diag — auth, queue, tutorial, process\n` +
+    `/fish — fishing + cooking\n/gather — woodcutting 🪓\n/mine — mining stone/coal/metal ⛏\n/combat — hunt Wilderness zombies ⚔️\n/auto — automatic orchestrator 🧠\n/stop — stop all bots\n/help — command list\n\n` +
+    `<i>1 account = 1 activity (safer against anti-cheat). Combat uses bank-first + auto-survival.</i>`;
 }
 
 const commands = {
@@ -661,7 +661,7 @@ const commands = {
   spinner: hSpinner, spin: hSpinner,
   gather: hStartGather, chop: hStartGather, mine: () => hStartGather(['rock']),
   auto: hAuto, combat: hStartCombat,
-  sell: () => '💰 Sell aktif setelah tutorial selesai.',
+  sell: () => '💰 Selling becomes available after the tutorial is completed.',
 };
 
 // Set menu command Telegram = HANYA yg dipakai sekarang (hapus sisa lama)
@@ -670,17 +670,17 @@ const MENU = [
   { command: 'gather', description: '🪓 Chop wood' },
   { command: 'mine', description: '⛏ Mining stone/coal/metal' },
   { command: 'combat', description: '⚔️ Hunt zombie Wilderness' },
-  { command: 'auto', description: '🧠 Auto-pilih aktivitas' },
-  { command: 'stop', description: '⏹️ Stop semua bot' },
-  { command: 'status', description: '📊 Status bot + inventory' },
+  { command: 'auto', description: '🧠 Auto activity orchestration' },
+  { command: 'stop', description: '⏹️ Stop all bots' },
+  { command: 'status', description: '📊 Bot status + inventory' },
   { command: 'diag', description: '🩺 Auth, queue, tutorial' },
-  { command: 'market', description: '🛒 Harga marketplace' },
-  { command: 'version', description: '🧩 Versi game' },
-  { command: 'skills', description: '📈 Level & XP skill' },
+  { command: 'market', description: '🛒 Marketplace prices' },
+  { command: 'version', description: '🧩 Game version watch' },
+  { command: 'skills', description: '📈 Skill levels & XP' },
   { command: 'balance', description: '💰 Gold/$KINS/resource' },
   { command: 'quest', description: '📋 Daily quest' },
   { command: 'spinner', description: '🎡 Free spin wheel (12h)' },
-  { command: 'help', description: '❓ Daftar command' },
+  { command: 'help', description: '❓ Command list' },
 ];
 async function syncMenu() {
   try {
@@ -700,7 +700,7 @@ async function syncMenu() {
   await syncMenu();
   await maybeNotifyVersionChange();
   await ensureDesiredServices();
-  await tg.send('🤖 <b>Kintara Bot online!</b> Ketik /help buat daftar perintah.').catch(() => {});
+  await tg.send('🤖 <b>Kintara Bot online!</b> Type /help to see the command list.').catch(() => {});
   console.log('[telegram-bot] polling...');
   let nextVersionPollAt = Date.now() + VERSION_POLL_MS;
   let nextKeepaliveAt = Date.now() + KEEPALIVE_POLL_MS;
