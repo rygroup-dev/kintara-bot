@@ -47,6 +47,13 @@ const HIT_MULT = 1;               // L1 wild_sword (no strength)
 const POTION_HP = 45;   // drink health potion at/below
 const SHIELD_HP = 28;   // also pop shield
 const RETREAT_HP = 22;  // bail to safe camp + Mainland
+const MIN_GOLD = Math.max(0, Number(config.combatMinGold) || 20);
+const TARGET_HEALTH_POTIONS = Math.max(0, Number(config.combatMinHealthPotions) || 6);
+const TARGET_SHIELD_POTIONS = Math.max(0, Number(config.combatMinShieldPotions) || 2);
+const POTION_COSTS = {
+  potion_health: { wood: 6, stone: 0, coal: 0 },
+  potion_shield: { wood: 0, stone: 5, coal: 0 },
+};
 
 const stats = {
   kills: 0, hits: 0, combatStart: null, combatNow: null, combatGain: 0,
@@ -60,6 +67,12 @@ function saveState(extra = {}) {
 let cli;
 let healthLeft = 0, shieldLeft = 0;   // diisi dari backpack saat start (server authoritative)
 let lastPotionAt = 0;
+let mats = { gold: 0, wood: 0, stone: 0, coal: 0, metal: 0 };
+const bankCount = (bp, type) => {
+  const arr = Array.isArray(bp?.bankSlots) ? bp.bankSlots : [];
+  const slot = arr.find((s) => s && s.t === type);
+  return slot ? Number(slot.n) || 0 : 0;
+};
 
 // Health potion = HoT +20/tick x5 = +100 total, DIDORONG CLIENT (consume-potion cuma
 // kurangi potion; heal sebenarnya client-side + save-hp). Headless: kita yg apply + persist.
@@ -70,7 +83,49 @@ async function refreshPotionCounts() {
     const me = await cli.me(); const bp = me.backpack || {};
     healthLeft = Number(bp.potion_health) || 0;
     shieldLeft = Number(bp.potion_shield) || 0;
+    mats = {
+      gold: Number(bp.gold) || 0,
+      wood: (Number(bp.wood) || 0) + bankCount(bp, 'wood'),
+      stone: (Number(bp.stone) || 0) + bankCount(bp, 'stone'),
+      coal: (Number(bp.coal) || 0) + bankCount(bp, 'coal'),
+      metal: Number(bp.metal) || 0,
+    };
+    return { ...mats, healthLeft, shieldLeft };
   } catch {}
+  return { ...mats, healthLeft, shieldLeft };
+}
+
+async function ensureCombatSupplies() {
+  await refreshPotionCounts();
+  log(`🧪 stok awal: health=${healthLeft}/${TARGET_HEALTH_POTIONS} shield=${shieldLeft}/${TARGET_SHIELD_POTIONS} | wood=${mats.wood} stone=${mats.stone} coal=${mats.coal} gold=${mats.gold}`);
+
+  const canAfford = (type) => {
+    const cost = POTION_COSTS[type] || {};
+    return Object.entries(cost).every(([k, v]) => (Number(mats[k]) || 0) >= v);
+  };
+
+  const buyUntilTarget = async (type, target) => {
+    while (canAfford(type)) {
+      const current = type === 'potion_health' ? healthLeft : shieldLeft;
+      if (current >= target) break;
+      const r = await cli.alchemistPotionBuy(type, 1).catch((e) => ({ ok: false, error: e.message }));
+      if (r && r.ok !== false && !r.error) {
+        await refreshPotionCounts();
+        log(`🧪 buy ${type} ok -> health=${healthLeft} shield=${shieldLeft} | wood=${mats.wood} stone=${mats.stone} coal=${mats.coal} gold=${mats.gold}`);
+        continue;
+      }
+      logT(`buy-${type}`, `🧪 buy ${type} stop: ${r?.error || 'rejected'}`, 5000);
+      break;
+    }
+  };
+
+  await buyUntilTarget('potion_health', TARGET_HEALTH_POTIONS);
+  await buyUntilTarget('potion_shield', TARGET_SHIELD_POTIONS);
+
+  if (mats.gold <= MIN_GOLD) {
+    log(`💰 reserve guard aktif — gold dijaga minimal ${MIN_GOLD}`);
+  }
+  log(`🧪 stok final: health=${healthLeft} shield=${shieldLeft} | wood=${mats.wood} stone=${mats.stone} coal=${mats.coal} gold=${mats.gold}`);
 }
 
 async function tryPotion(p, type) {
@@ -260,6 +315,12 @@ async function connectWithRetry() {
       const r = await bank.depositAll(cli);
       log(r.moved.length ? `🏦 banked: ${r.moved.join(', ')}` : '🏦 gak ada loot utk di-bank (aman)');
     } catch (e) { log('bank err (lanjut): ' + e.message.slice(0, 50)); }
+
+    try {
+      await ensureCombatSupplies();
+    } catch (e) {
+      log('alchemist err (lanjut): ' + e.message.slice(0, 50));
+    }
 
     // === ENTER WILD ===
     const entered = await enterWild(p);
