@@ -58,6 +58,21 @@ function pidOf(f) {
 function botPid() { return pidOf(PIDFILE); }
 function gatherPid() { return pidOf(GPIDFILE); }
 function combatPid() { return pidOf(CPIDFILE); }
+function stopPidfile(pf) {
+  const pid = pidOf(pf);
+  if (!pid) return null;
+  try { process.kill(pid, 'SIGKILL'); } catch {}
+  try { fs.unlinkSync(pf); } catch {}
+  return pid;
+}
+function stopAllMainBots() {
+  return {
+    auto: stopPidfile(OPIDFILE),
+    fish: stopPidfile(PIDFILE),
+    gather: stopPidfile(GPIDFILE),
+    combat: stopPidfile(CPIDFILE),
+  };
+}
 function fmtAgeMin(min) {
   if (min == null || Number.isNaN(Number(min))) return '?';
   const total = Math.max(0, Math.round(Number(min)));
@@ -209,9 +224,26 @@ async function maybeNotifyVersionChange() {
     const current = await fetchGameVersion();
     if (!current.sha) return;
     const prev = readVersionState();
-    saveVersionState({ sha: current.sha, previousSha: prev.sha || null });
+    const changed = !!(prev.sha && prev.sha !== current.sha);
+    saveVersionState({
+      sha: current.sha,
+      previousSha: changed ? prev.sha : (prev.previousSha || null),
+      lastChangedAt: changed ? Date.now() : (prev.lastChangedAt || null),
+      notifiedSha: changed ? current.sha : (prev.notifiedSha || null),
+    });
     if (prev.sha && prev.sha !== current.sha) {
-      await tg.send(`🆕 Game update terdeteksi\nold: \`${prev.sha.slice(0, 8)}\`\nnew: \`${current.sha.slice(0, 8)}\`\nCek bot sebelum lanjut auto-run.`).catch(() => {});
+      clearDesired('fish', 'gather', 'auto', 'combat');
+      const stopped = stopAllMainBots();
+      const stoppedNames = [
+        stopped.auto ? 'auto' : null,
+        stopped.fish ? 'fish' : null,
+        stopped.gather ? 'gather' : null,
+        stopped.combat ? 'combat' : null,
+      ].filter(Boolean);
+      const stopLine = stoppedNames.length
+        ? `\n🛑 Automation dipause otomatis: ${stoppedNames.join(', ')}`
+        : '\n🛑 Tidak ada bot aktif saat update terdeteksi.';
+      await tg.send(`🆕 Game update terdeteksi\nold: \`${prev.sha.slice(0, 8)}\`\nnew: \`${current.sha.slice(0, 8)}\`${stopLine}\nCek bot / API dulu sebelum jalanin lagi.`).catch(() => {});
     }
   } catch {}
 }
@@ -507,8 +539,21 @@ async function hVersion() {
   if (authErr) return authErr;
   const current = await fetchGameVersion();
   const prev = readVersionState();
-  saveVersionState({ sha: current.sha, previousSha: prev.sha || null });
-  return `🧩 <b>Game Version</b>\ncurrent: ${current.sha || '?'}\nlast saved: ${prev.sha || current.sha || '?'}\nwatch: auto-detect ON`;
+  const changed = !!(prev.sha && current.sha && prev.sha !== current.sha);
+  saveVersionState({
+    sha: current.sha,
+    previousSha: changed ? prev.sha : (prev.previousSha || null),
+    lastChangedAt: changed ? Date.now() : (prev.lastChangedAt || null),
+    notifiedSha: changed ? current.sha : (prev.notifiedSha || null),
+  });
+  const active = [
+    pidOf(OPIDFILE) ? 'auto' : null,
+    botPid() ? 'fish' : null,
+    gatherPid() ? 'gather' : null,
+    combatPid() ? 'combat' : null,
+  ].filter(Boolean);
+  const changedAt = prev.lastChangedAt ? new Date(prev.lastChangedAt).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '-';
+  return `🧩 <b>Game Version</b>\ncurrent: ${current.sha || '?'}\nprevious: ${prev.previousSha || prev.sha || current.sha || '?'}\nlast change: ${changedAt}\nwatch: auto-detect ON (${Math.round(VERSION_POLL_MS / 60000)}m)\nautomation: ${active.length ? active.join(', ') : 'idle'}`;
 }
 async function hDiag() {
   const authErr = await ensureLoginOk();
@@ -596,10 +641,9 @@ async function hStartCombat() {
 function hStop() {
   let msg = [];
   clearDesired('fish', 'gather', 'auto', 'combat');
-  // matikan orchestrator dulu (biar gak restart bot)
   for (const [name, pf] of [['Orchestrator', OPIDFILE], ['Fishing', PIDFILE], ['Gather', GPIDFILE], ['Combat', CPIDFILE]]) {
-    const pid = pidOf(pf);
-    if (pid) { try { process.kill(pid, 'SIGKILL'); } catch {} try { fs.unlinkSync(pf); } catch {} msg.push(`🛑 ${name} STOP (pid ${pid})`); }
+    const pid = stopPidfile(pf);
+    if (pid) msg.push(`🛑 ${name} STOP (pid ${pid})`);
   }
   return msg.length ? msg.join('\n') : '🔴 Semua bot udah OFF.';
 }
