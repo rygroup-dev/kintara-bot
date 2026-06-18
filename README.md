@@ -21,6 +21,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/rygroup-dev/kintara-bot/main
 ```
 
 The installer clones the repo, installs dependencies, asks for **just 2 inputs** (wallet private key + Telegram bot token), writes `.env` with locked permissions, and starts the Telegram control bot.
+On supported systems it will also try to install missing base dependencies like **git** and **Node.js** automatically.
 
 **What you get after install:**
 
@@ -40,7 +41,7 @@ WALLET_PRIVATE_KEY=your_base58_key TELEGRAM_BOT_TOKEN=123456:AA... \
 ## 🚀 Quick Start
 
 1. Create a Telegram bot with [@BotFather](https://t.me/BotFather)
-2. Run the one-line installer on your VPS / Linux server
+2. Run the one-line installer on your VPS, Linux PC, macOS, or WSL shell
 3. Paste your `WALLET_PRIVATE_KEY` and `TELEGRAM_BOT_TOKEN`
 4. Open your Telegram bot
 5. Type `/start` then `/help`
@@ -52,6 +53,7 @@ WALLET_PRIVATE_KEY=your_base58_key TELEGRAM_BOT_TOKEN=123456:AA... \
 - **Telegram-first UX**: run, monitor, stop, inspect, and troubleshoot from chat
 - **Safer automation model**: 1 account = 1 activity, bank-first combat flow, auto-revive/keepalive, and version-watch safety checks
 - **Built for real VPS use**: one-line installer, persistent config, and clean restart path
+- **Works locally too**: not limited to VPS, as long as you run it from a compatible shell environment
 
 ## 📱 Control via Telegram
 
@@ -59,7 +61,7 @@ After install, open your Telegram bot and type `/start`:
 
 | Command | Action |
 |---------|--------|
-| `/fish` | 🎣 Fishing + auto-cooking |
+| `/fishing` | 🎣 Fishing + auto-cooking |
 | `/gather` | 🪓 Chop wood (woodcutting) |
 | `/mine` | ⛏ Mine stone + coal + metal |
 | `/combat` | ⚔️ Hunt Wilderness mobs (combat XP) |

@@ -13,9 +13,72 @@ DIR="${KINTARA_DIR:-kintara-bot}"
 
 echo "🤖 Kintara Bot installer"
 
-# --- Node check ---
-command -v node >/dev/null 2>&1 || { echo "❌ Node.js >=18 is not installed. Install it first: https://nodejs.org"; exit 1; }
-command -v git  >/dev/null 2>&1 || { echo "❌ git is not installed."; exit 1; }
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+need_sudo() {
+  if have_cmd sudo; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
+install_git() {
+  if have_cmd git; then return 0; fi
+  echo "📦 git not found. Attempting automatic install..."
+  if have_cmd apt-get; then
+    need_sudo apt-get update
+    need_sudo apt-get install -y git
+  elif have_cmd dnf; then
+    need_sudo dnf install -y git
+  elif have_cmd yum; then
+    need_sudo yum install -y git
+  elif have_cmd brew; then
+    brew install git
+  else
+    echo "❌ git is not installed and no supported package manager was found."
+    echo "   Please install git manually, then run the one-liner again."
+    exit 1
+  fi
+}
+
+install_node() {
+  if have_cmd node; then return 0; fi
+  echo "📦 Node.js not found. Attempting automatic install..."
+  if have_cmd apt-get; then
+    need_sudo apt-get update
+    need_sudo apt-get install -y ca-certificates curl gnupg
+    curl -fsSL https://deb.nodesource.com/setup_20.x | need_sudo bash
+    need_sudo apt-get install -y nodejs
+  elif have_cmd dnf; then
+    curl -fsSL https://rpm.nodesource.com/setup_20.x | need_sudo bash
+    need_sudo dnf install -y nodejs
+  elif have_cmd yum; then
+    curl -fsSL https://rpm.nodesource.com/setup_20.x | need_sudo bash
+    need_sudo yum install -y nodejs
+  elif have_cmd brew; then
+    brew install node
+  else
+    echo "❌ Node.js >=18 is not installed and no supported package manager was found."
+    echo "   Please install Node.js manually from https://nodejs.org, then rerun the installer."
+    exit 1
+  fi
+}
+
+ensure_node_18_plus() {
+  if ! have_cmd node; then install_node; fi
+  local major
+  major="$(node -p 'process.versions.node.split(\".\")[0]')"
+  if [ "${major:-0}" -lt 18 ]; then
+    echo "❌ Node.js ${major} detected, but Node.js >=18 is required."
+    echo "   Please upgrade Node.js and rerun the installer."
+    exit 1
+  fi
+}
+
+# --- system deps ---
+install_git
+ensure_node_18_plus
+have_cmd npm || { echo "❌ npm is missing even though Node.js is installed. Please fix Node.js/npm first."; exit 1; }
 
 # --- clone / update ---
 if [ -d "$DIR/.git" ]; then
@@ -54,5 +117,5 @@ sleep 2
 echo ""
 echo "✅ DONE! Control bot is running (pid $(cat recon/control/telegram.pid))."
 echo "   Open your Telegram bot, type /start then /help."
-echo "   Commands: /fish /gather /mine /combat /auto /stop /status /skills /balance /quest"
+echo "   Commands: /fishing /gather /mine /combat /auto /stop /status /skills /balance /quest"
 echo "   Log: $DIR/recon/telegram.log"
