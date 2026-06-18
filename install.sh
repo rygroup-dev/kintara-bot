@@ -117,5 +117,5 @@ sleep 2
 echo ""
 echo "✅ DONE! Control bot is running (pid $(cat recon/control/telegram.pid))."
 echo "   Open your Telegram bot, type /start then /help."
-echo "   Commands: /fishing /gather /mine /combat /auto /stop /status /skills /balance /quest"
+echo "   Commands: /fishing /gather /mine /combat /auto /stop /status /skills /balance /market /spinner /server /quest"
 echo "   Log: $DIR/recon/telegram.log"

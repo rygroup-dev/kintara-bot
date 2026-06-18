@@ -75,6 +75,7 @@ After install, open your Telegram bot and type `/start`:
 | `/quest` | 📋 Daily quests |
 | `/version` | 🧩 Current game/client version detected by bot |
 | `/diag` | 🩺 Auth / queue / tutorial diagnostics |
+| `/server` | 🌐 Live server queues + auto-pick (lowest queue) |
 | `/help` | ❓ Command list |
 
 > **1 account = 1 activity** at a time: fishing, gathering, or combat. This is more natural and safer against anti-cheat heuristics.
@@ -85,6 +86,7 @@ After install, open your Telegram bot and type `/start`:
 - **Daily `/spinner`**: claims the free spin wheel reward and reports cooldown / paid-spin ticker info.
 - **Smart `/auto`**: orchestrator chooses the best activity automatically instead of locking you into one loop.
 - **Realtime `/status`**: shows current bot state, inventory snapshot, balance, and spinner readiness.
+- **Auto shard picker**: every start/auto-revive joins the lowest-queue joinable server automatically (restricted servers are skipped); `/server` shows live queues.
 - **Version watchdog**: monitors game version drift and auto-pauses automation when Kintara updates.
 
 ## ⚔️ Combat & Survival
