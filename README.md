@@ -59,7 +59,7 @@ After install, open your Telegram bot and type `/start`:
 
 | Command | Action |
 |---------|--------|
-| `/fish` | 🎣 Fishing + auto-cooking |
+| `/fishing` | 🎣 Fishing + auto-cooking |
 | `/gather` | 🪓 Chop wood (woodcutting) |
 | `/mine` | ⛏ Mine stone + coal + metal |
 | `/combat` | ⚔️ Hunt Wilderness mobs (combat XP) |
