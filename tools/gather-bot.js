@@ -33,6 +33,20 @@ const stats = {
   reconnects: 0,
   started: Date.now(),
 };
+function saveState(extra = {}) {
+  fs.writeFileSync(path.join(OUT, 'gather-state.json'), JSON.stringify({
+    ...stats,
+    kind: KIND,
+    region: extra.region || stats.region || 'world',
+    phase: extra.phase || stats.phase || 'boot',
+    queueAhead: extra.queueAhead != null ? extra.queueAhead : (stats.queueAhead ?? null),
+    updatedAt: Date.now(),
+    ageMin: Math.round((Date.now() - stats.started) / 60000),
+  }, null, 2));
+  if (extra.region !== undefined) stats.region = extra.region;
+  if (extra.phase !== undefined) stats.phase = extra.phase;
+  if (extra.queueAhead !== undefined) stats.queueAhead = extra.queueAhead;
+}
 
 let cli;
 async function connectWithRetry() {
@@ -40,12 +54,17 @@ async function connectWithRetry() {
     try {
       const p = new Presence(SHARD);
       p.on('log', (m) => log('[ws] ' + m));
-      p.on('queue', (d) => { if (d.ahead % 5 === 0) log('queue ahead=' + d.ahead); });
+      p.on('queue', (d) => {
+        if (d.ahead % 5 === 0) log('queue ahead=' + d.ahead);
+        saveState({ phase: 'queue', queueAhead: Number.isFinite(Number(d?.ahead)) ? Number(d.ahead) : null, region: p.region });
+      });
       await p.connect();
       log('✅ presence live region=' + p.region);
+      saveState({ phase: 'presence', queueAhead: null, region: p.region });
       return p;
     } catch (e) {
       if (isWalletBannedError(e)) throw e;
+      saveState({ phase: 'reconnect', queueAhead: null });
       log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 50)} — retry 15s`);
       await sleep(15000);
     }
@@ -72,6 +91,7 @@ async function persistLoot(loot, yld = 1) {
 async function gatherLoop(p) {
   const harvested = new Set();
   while (p.ready) {
+    saveState({ phase: 'scan', queueAhead: null, region: p.region });
     const pool = KIND === 'all' ? [...p.knownNodes('tree'), ...p.knownNodes('rock')] : p.knownNodes(KIND);
     const nodes = pool.filter((n) => !harvested.has(n.key));
     if (!nodes.length) { logT('wait', 'nunggu node dari res_evt...'); await sleep(5000); continue; }
@@ -90,12 +110,7 @@ async function gatherLoop(p) {
     const res = await p.harvestNode(node.kind, node.key, node.hasCoal, node.hasMetal, { maxHits: 10, hitGap: 1700 });
     stats.harvests++;
     if (res.felled) { stats.felled++; await persistLoot(res.loot, 1); logT('fell', `🪓 felled ${node.kind} @${node.key} -> ${res.loot} (wood=${stats.wood} stone=${stats.stone} coal=${stats.coal} metal=${stats.metal}, felled ${stats.felled})`, 15000); }
-    fs.writeFileSync(path.join(OUT, 'gather-state.json'), JSON.stringify({
-      ...stats,
-      kind: KIND,
-      region: p.region,
-      ageMin: Math.round((Date.now() - stats.started) / 60000),
-    }, null, 2));
+    saveState({ phase: 'gather', queueAhead: null, region: p.region });
     await sleep(1500);
     if (harvested.size > 200) harvested.clear(); // reset biar bisa re-harvest (node respawn)
   }
@@ -104,13 +119,15 @@ async function gatherLoop(p) {
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, 'gather.log'), '');
+  saveState({ phase: 'boot', queueAhead: null, region: 'world' });
   const a = await login(); cli = new KintaraClient({ cookie: a.cookie });
   log('GATHER BOT START kind=' + KIND + ' pid=' + a.player?.id);
   for (;;) {
     const p = await connectWithRetry();
-    p.on('close', () => { stats.reconnects++; log('⚠️ presence closed -> reconnect'); });
+    p.on('close', () => { stats.reconnects++; saveState({ phase: 'reconnect', queueAhead: null, region: p.region }); log('⚠️ presence closed -> reconnect'); });
     await sleep(2000);
     // diam dulu 8s biar kekumpul node dari res_evt
+    saveState({ phase: 'learning', queueAhead: null, region: p.region });
     log('belajar node 8s...'); await sleep(8000);
     await gatherLoop(p);
     try { p.close(); } catch {}

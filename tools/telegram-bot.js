@@ -13,6 +13,7 @@ const tg = require('../lib/telegram');
 const { KintaraClient } = require('../lib/kintaraClient');
 const { levelFromTotalXp, formatSkillBandProgressShort, averageLevelFloor, preciseAverageLevel } = require('../lib/skillXp');
 const { login, isWalletBannedError } = require('../lib/walletAuth');
+const { Presence } = require('../lib/presenceWs');
 const { getErrors } = require('../lib/errorbus');
 
 const ROOT = path.join(__dirname, '..');
@@ -27,8 +28,11 @@ const AUTOREVIVE_STATEFILE = path.join(OUT, 'control', 'autorevive.json');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const VERSION_POLL_MS = 10 * 60 * 1000;
 const KEEPALIVE_POLL_MS = 20 * 1000;
+const AUTO_VERSION_REVIEW = (process.env.KINTARA_AUTO_VERSION_REVIEW || 'true').toLowerCase() !== 'false';
+const VERSION_REVIEW_TIMEOUT_MS = parseInt(process.env.KINTARA_VERSION_REVIEW_TIMEOUT_MS || '45000', 10);
 
 let cli = null, lastAuth = 0, myPid = null;
+let activeVersionReviewSha = null;
 async function client() {
   if (!cli || Date.now() - lastAuth > 1500000) { const a = await login(); cli = new KintaraClient({ cookie: a.cookie }); myPid = a.player?.id || myPid; lastAuth = Date.now(); }
   return cli;
@@ -243,10 +247,94 @@ function versionVerificationSummary(state, currentSha) {
     : '';
   return `compat: verified ${String(currentSha).slice(0, 8)} @ ${at}${notes}`;
 }
+function currentVersionReviewStatus(state, currentSha) {
+  if (!state || !currentSha || state.reviewSha !== currentSha) return null;
+  if (state.reviewStatus === 'running') return 'review: auto-smoke running';
+  if (state.reviewStatus === 'failed') {
+    const tail = state.reviewError ? ` (${String(state.reviewError).slice(0, 80)})` : '';
+    return `review: auto-smoke needs manual check${tail}`;
+  }
+  if (state.reviewStatus === 'passed') return 'review: auto-smoke passed';
+  return null;
+}
 async function fetchGameVersion() {
   const c = await client();
   const v = await c.version().catch(() => ({}));
   return { sha: v?.sha || null, ok: !!v?.ok };
+}
+async function smokeCheckPresence(shard, timeoutMs = VERSION_REVIEW_TIMEOUT_MS) {
+  const p = new Presence(shard);
+  let queueAhead = null;
+  p.on('queue', (d) => {
+    const ahead = Number(d?.ahead);
+    if (Number.isFinite(ahead)) queueAhead = ahead;
+  });
+  try {
+    await Promise.race([
+      p.connect(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`presence timeout${queueAhead != null ? ` (queue ${queueAhead})` : ''}`)), timeoutMs)),
+    ]);
+    return { shard, region: p.region, queueAhead };
+  } finally {
+    try { p.close(); } catch {}
+  }
+}
+async function runAutoVersionReview(sha) {
+  if (!sha || activeVersionReviewSha === sha) return;
+  activeVersionReviewSha = sha;
+  const prev = readVersionState();
+  saveVersionState({
+    ...prev,
+    reviewSha: sha,
+    reviewStatus: 'running',
+    reviewAt: Date.now(),
+    reviewError: null,
+  });
+  (async () => {
+    const notes = [];
+    const lines = [`🧪 Auto review started for \`${String(sha).slice(0, 8)}\``];
+    try {
+      const auth = await login();
+      const c = new KintaraClient({ cookie: auth.cookie });
+      lines.push('• auth/login OK');
+      const version = await c.version();
+      if (!version?.sha) throw new Error('version endpoint returned no SHA');
+      if (version.sha !== sha) throw new Error(`SHA changed again to ${String(version.sha).slice(0, 8)}`);
+      notes.push('rest');
+      lines.push(`• /api/version OK (${String(version.sha).slice(0, 8)})`);
+      const me = await c.me();
+      if (!me?.player?.id) throw new Error('auth/me missing player payload');
+      lines.push(`• /api/auth/me OK (player ${me.player.id})`);
+      const market = await c.marketplaceStats('fish');
+      if (market?.ok === false) throw new Error('marketplace stats rejected');
+      lines.push('• basic endpoint OK (/api/marketplace/stats)');
+      const presence = await smokeCheckPresence(config.shard || 's2');
+      notes.push('presence');
+      lines.push(`• presence OK (${presence.shard}${presence.queueAhead != null ? `, queue ${presence.queueAhead}` : ''}, region ${presence.region})`);
+      markVersionVerified(sha, [...new Set([...notes, 'basic', 'smoke-auto'])]);
+      const next = readVersionState();
+      saveVersionState({
+        ...next,
+        reviewSha: sha,
+        reviewStatus: 'passed',
+        reviewAt: Date.now(),
+        reviewError: null,
+      });
+      await tg.send(`${lines.join('\n')}\n\n✅ Auto review PASSED.\nAutomation tetap pause dulu sampai bang start lagi manual.`).catch(() => {});
+    } catch (e) {
+      const next = readVersionState();
+      saveVersionState({
+        ...next,
+        reviewSha: sha,
+        reviewStatus: 'failed',
+        reviewAt: Date.now(),
+        reviewError: e.message,
+      });
+      await tg.send(`${lines.join('\n')}\n\n⚠️ Auto review belum lolos penuh: ${(e.message || '').slice(0, 160)}\nBot tetap pause. Perlu cek manual dulu sebelum start lagi.`).catch(() => {});
+    } finally {
+      activeVersionReviewSha = null;
+    }
+  })().catch(() => { activeVersionReviewSha = null; });
 }
 async function maybeNotifyVersionChange() {
   try {
@@ -276,6 +364,7 @@ async function maybeNotifyVersionChange() {
         ? `\n🛑 Automation auto-paused: ${stoppedNames.join(', ')}`
         : '\n🛑 No active bots were running when the update was detected.';
       await tg.send(`🆕 Game update detected\nold: \`${prev.sha.slice(0, 8)}\`\nnew: \`${current.sha.slice(0, 8)}\`${stopLine}\nPlease review the bot / API before starting automation again.`).catch(() => {});
+      if (AUTO_VERSION_REVIEW) runAutoVersionReview(current.sha);
     }
   } catch {}
 }
@@ -318,7 +407,12 @@ async function hStatus() {
   lines.push('');
   lines.push('📦 <b>Session</b>');
   if (fr && s && isFreshState(s)) lines.push(`🎣 fish ${s.ok || 0}/${s.casts || 0} | 🎒 ${s.fish || 0} | 🍳 ${s.cooked || 0} | 💰 ${s.sold || 0} | ⏱ ${fmtAgeMin(s.ageMin)}`);
-  if (gr && g && isFreshState(g, 60 * 60 * 1000)) lines.push(`🪓 felled ${g.felled || 0} | 🪵 ${g.wood || 0} (+${g.gainedWood || 0}) | 🪨 ${g.stone || 0} (+${g.gainedStone || 0}) | ⬛ ${g.coal || 0} (+${g.gainedCoal || 0}) | 🔩 ${g.metal || 0} (+${g.gainedMetal || 0}) | ⏱ ${fmtAgeMin(g.ageMin)}`);
+  if (gr && g && isFreshState(g, 60 * 60 * 1000)) {
+    const phaseLabel = g.phase === 'queue'
+      ? (g.queueAhead != null ? `queue ${g.queueAhead}` : 'queue')
+      : g.phase || null;
+    lines.push(`🪓 felled ${g.felled || 0} | 🪵 ${g.wood || 0} (+${g.gainedWood || 0}) | 🪨 ${g.stone || 0} (+${g.gainedStone || 0}) | ⬛ ${g.coal || 0} (+${g.gainedCoal || 0}) | 🔩 ${g.metal || 0} (+${g.gainedMetal || 0})${phaseLabel ? ` | 📍 ${phaseLabel}` : ''} | ⏱ ${fmtAgeMin(g.ageMin)}`);
+  }
   if (cb && cs && isFreshState(cs, 60 * 60 * 1000)) {
     const phaseMap = {
       boot: 'boot',
@@ -435,6 +529,10 @@ const ITEM_LABEL = Object.fromEntries(MARKET_ITEMS.map(([k, v]) => [k, v]));
 
 let mkSession = null;
 function mkReset() { mkSession = null; }
+function marketSellSafetyWarning() {
+  if (!botPid() && !gatherPid() && !combatPid() && !pidOf(OPIDFILE)) return '';
+  return '<i>Warning: a bot is currently running. Selling while automation is active may fail if inventory slots change. For the safest sell flow, use /stop first.</i>\n\n';
+}
 
 async function hMarket() {
   const authErr = await ensureLoginOk();
@@ -480,7 +578,7 @@ async function mkShowInventory(ctx) {
   for (let i = 0; i < rows.length; i += 2) grid.push(rows.slice(i, i + 2));
   grid.push([{ text: '⬅️ Back', data: 'mk:back' }]);
   mkSession = { mode: 'sell', step: 'pick-item' };
-  await tg.editMessage(ctx.chatId, ctx.messageId, '💰 <b>SELL</b> — choose an item:', { buttons: grid });
+  await tg.editMessage(ctx.chatId, ctx.messageId, `${marketSellSafetyWarning()}💰 <b>SELL</b> — choose an item:`, { buttons: grid });
 }
 async function mkPickCurrency(slotIdx, ctx) {
   const c = await client();
@@ -488,7 +586,7 @@ async function mkPickCurrency(slotIdx, ctx) {
   if (!sl || !sl.t) { await tg.editMessage(ctx.chatId, ctx.messageId, '⚠️ Slot is empty, please choose again.', { buttons: [[{ text: '⬅️ Back', data: 'mk:sell' }]] }); return; }
   mkSession = { mode: 'sell', slotIndex: Number(slotIdx), item: sl.t, step: 'pick-currency' };
   await tg.editMessage(ctx.chatId, ctx.messageId,
-    `💰 <b>SELL ${ITEM_LABEL[sl.t] || sl.t}</b> (you have ${sl.n || 1})\nWhich currency do you want to use?`,
+    `${marketSellSafetyWarning()}💰 <b>SELL ${ITEM_LABEL[sl.t] || sl.t}</b> (you have ${sl.n || 1})\nWhich currency do you want to use?`,
     { buttons: [[{ text: '🪙 Gold', data: 'mk:cur:gold' }, { text: '🪙 $KINS', data: 'mk:cur:token' }], [{ text: '⬅️ Back', data: 'mk:sell' }]] });
 }
 async function mkAskQtyPrice(currency, ctx) {
@@ -496,7 +594,7 @@ async function mkAskQtyPrice(currency, ctx) {
   mkSession = { mode: 'sell', item: mkSession.item, slotIndex: mkSession.slotIndex, currency, step: 'await-input' };
   const unit = currency === 'token' ? 'USD (total listing)' : 'gold (per unit)';
   await tg.editMessage(ctx.chatId, ctx.messageId,
-    `💰 <b>SELL ${ITEM_LABEL[mkSession.item] || mkSession.item}</b> — ${currency === 'token' ? '$KINS' : 'Gold'}\n\n` +
+    `${marketSellSafetyWarning()}💰 <b>SELL ${ITEM_LABEL[mkSession.item] || mkSession.item}</b> — ${currency === 'token' ? '$KINS' : 'Gold'}\n\n` +
     `Type: <code>qty price</code>\nExample: <code>1 25</code>\n\n• qty = quantity\n• price = ${unit}`,
     { buttons: [[{ text: '❌ Cancel', data: 'mk:back' }]] });
 }
@@ -644,6 +742,8 @@ async function hDiag() {
   const vs = readVersionState();
   if (vs.sha) lines.push(`🧩 ver: ${String(vs.sha).slice(0, 8)}`);
   lines.push(`✅ ${versionVerificationSummary(vs, vs.sha)}`);
+  const review = currentVersionReviewStatus(vs, vs.sha);
+  if (review) lines.push(`🧪 ${review}`);
   if (lastErr) lines.push(`⚠️ last err: ${lastErr.code} @ ${lastErr.context} (${lastErr.count}x)`);
   return lines.join('\n');
 }
@@ -753,6 +853,10 @@ async function syncMenu() {
     const current = await fetchGameVersion();
     if (current.sha) markVersionVerified(current.sha, ['rest', 'presence', 'gather']);
   }
+  if (AUTO_VERSION_REVIEW) {
+    const state = readVersionState();
+    if (state.sha && state.verifiedSha !== state.sha) runAutoVersionReview(state.sha);
+  }
   await ensureDesiredServices();
   await tg.send('🤖 <b>Kintara Bot online!</b> Type /help to see the command list.').catch(() => {});
   console.log('[telegram-bot] polling...');
@@ -768,6 +872,6 @@ async function syncMenu() {
       try { await ensureDesiredServices(); } catch (e) { console.error('keepalive err', e.message); }
       nextKeepaliveAt = Date.now() + KEEPALIVE_POLL_MS;
     }
-    await sleep(2000);
+    await sleep(150);
   }
 })().catch((e) => { console.error('FATAL', e.message); process.exit(1); });
