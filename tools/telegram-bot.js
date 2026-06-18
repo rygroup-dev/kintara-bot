@@ -13,6 +13,7 @@ const tg = require('../lib/telegram');
 const { KintaraClient } = require('../lib/kintaraClient');
 const { levelFromTotalXp, formatSkillBandProgressShort, averageLevelFloor, preciseAverageLevel } = require('../lib/skillXp');
 const { login, isWalletBannedError } = require('../lib/walletAuth');
+const { Presence } = require('../lib/presenceWs');
 const { getErrors } = require('../lib/errorbus');
 
 const ROOT = path.join(__dirname, '..');
@@ -27,8 +28,11 @@ const AUTOREVIVE_STATEFILE = path.join(OUT, 'control', 'autorevive.json');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const VERSION_POLL_MS = 10 * 60 * 1000;
 const KEEPALIVE_POLL_MS = 20 * 1000;
+const AUTO_VERSION_REVIEW = (process.env.KINTARA_AUTO_VERSION_REVIEW || 'true').toLowerCase() !== 'false';
+const VERSION_REVIEW_TIMEOUT_MS = parseInt(process.env.KINTARA_VERSION_REVIEW_TIMEOUT_MS || '45000', 10);
 
 let cli = null, lastAuth = 0, myPid = null;
+let activeVersionReviewSha = null;
 async function client() {
   if (!cli || Date.now() - lastAuth > 1500000) { const a = await login(); cli = new KintaraClient({ cookie: a.cookie }); myPid = a.player?.id || myPid; lastAuth = Date.now(); }
   return cli;
@@ -243,10 +247,94 @@ function versionVerificationSummary(state, currentSha) {
     : '';
   return `compat: verified ${String(currentSha).slice(0, 8)} @ ${at}${notes}`;
 }
+function currentVersionReviewStatus(state, currentSha) {
+  if (!state || !currentSha || state.reviewSha !== currentSha) return null;
+  if (state.reviewStatus === 'running') return 'review: auto-smoke running';
+  if (state.reviewStatus === 'failed') {
+    const tail = state.reviewError ? ` (${String(state.reviewError).slice(0, 80)})` : '';
+    return `review: auto-smoke needs manual check${tail}`;
+  }
+  if (state.reviewStatus === 'passed') return 'review: auto-smoke passed';
+  return null;
+}
 async function fetchGameVersion() {
   const c = await client();
   const v = await c.version().catch(() => ({}));
   return { sha: v?.sha || null, ok: !!v?.ok };
+}
+async function smokeCheckPresence(shard, timeoutMs = VERSION_REVIEW_TIMEOUT_MS) {
+  const p = new Presence(shard);
+  let queueAhead = null;
+  p.on('queue', (d) => {
+    const ahead = Number(d?.ahead);
+    if (Number.isFinite(ahead)) queueAhead = ahead;
+  });
+  try {
+    await Promise.race([
+      p.connect(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`presence timeout${queueAhead != null ? ` (queue ${queueAhead})` : ''}`)), timeoutMs)),
+    ]);
+    return { shard, region: p.region, queueAhead };
+  } finally {
+    try { p.close(); } catch {}
+  }
+}
+async function runAutoVersionReview(sha) {
+  if (!sha || activeVersionReviewSha === sha) return;
+  activeVersionReviewSha = sha;
+  const prev = readVersionState();
+  saveVersionState({
+    ...prev,
+    reviewSha: sha,
+    reviewStatus: 'running',
+    reviewAt: Date.now(),
+    reviewError: null,
+  });
+  (async () => {
+    const notes = [];
+    const lines = [`🧪 Auto review started for \`${String(sha).slice(0, 8)}\``];
+    try {
+      const auth = await login();
+      const c = new KintaraClient({ cookie: auth.cookie });
+      lines.push('• auth/login OK');
+      const version = await c.version();
+      if (!version?.sha) throw new Error('version endpoint returned no SHA');
+      if (version.sha !== sha) throw new Error(`SHA changed again to ${String(version.sha).slice(0, 8)}`);
+      notes.push('rest');
+      lines.push(`• /api/version OK (${String(version.sha).slice(0, 8)})`);
+      const me = await c.me();
+      if (!me?.player?.id) throw new Error('auth/me missing player payload');
+      lines.push(`• /api/auth/me OK (player ${me.player.id})`);
+      const market = await c.marketplaceStats('fish');
+      if (market?.ok === false) throw new Error('marketplace stats rejected');
+      lines.push('• basic endpoint OK (/api/marketplace/stats)');
+      const presence = await smokeCheckPresence(config.shard || 's2');
+      notes.push('presence');
+      lines.push(`• presence OK (${presence.shard}${presence.queueAhead != null ? `, queue ${presence.queueAhead}` : ''}, region ${presence.region})`);
+      markVersionVerified(sha, [...new Set([...notes, 'basic', 'smoke-auto'])]);
+      const next = readVersionState();
+      saveVersionState({
+        ...next,
+        reviewSha: sha,
+        reviewStatus: 'passed',
+        reviewAt: Date.now(),
+        reviewError: null,
+      });
+      await tg.send(`${lines.join('\n')}\n\n✅ Auto review PASSED.\nAutomation tetap pause dulu sampai bang start lagi manual.`).catch(() => {});
+    } catch (e) {
+      const next = readVersionState();
+      saveVersionState({
+        ...next,
+        reviewSha: sha,
+        reviewStatus: 'failed',
+        reviewAt: Date.now(),
+        reviewError: e.message,
+      });
+      await tg.send(`${lines.join('\n')}\n\n⚠️ Auto review belum lolos penuh: ${(e.message || '').slice(0, 160)}\nBot tetap pause. Perlu cek manual dulu sebelum start lagi.`).catch(() => {});
+    } finally {
+      activeVersionReviewSha = null;
+    }
+  })().catch(() => { activeVersionReviewSha = null; });
 }
 async function maybeNotifyVersionChange() {
   try {
@@ -276,6 +364,7 @@ async function maybeNotifyVersionChange() {
         ? `\n🛑 Automation auto-paused: ${stoppedNames.join(', ')}`
         : '\n🛑 No active bots were running when the update was detected.';
       await tg.send(`🆕 Game update detected\nold: \`${prev.sha.slice(0, 8)}\`\nnew: \`${current.sha.slice(0, 8)}\`${stopLine}\nPlease review the bot / API before starting automation again.`).catch(() => {});
+      if (AUTO_VERSION_REVIEW) runAutoVersionReview(current.sha);
     }
   } catch {}
 }
@@ -644,6 +733,8 @@ async function hDiag() {
   const vs = readVersionState();
   if (vs.sha) lines.push(`🧩 ver: ${String(vs.sha).slice(0, 8)}`);
   lines.push(`✅ ${versionVerificationSummary(vs, vs.sha)}`);
+  const review = currentVersionReviewStatus(vs, vs.sha);
+  if (review) lines.push(`🧪 ${review}`);
   if (lastErr) lines.push(`⚠️ last err: ${lastErr.code} @ ${lastErr.context} (${lastErr.count}x)`);
   return lines.join('\n');
 }
@@ -752,6 +843,10 @@ async function syncMenu() {
   if (process.env.KINTARA_VERIFY_CURRENT_SHA === '1') {
     const current = await fetchGameVersion();
     if (current.sha) markVersionVerified(current.sha, ['rest', 'presence', 'gather']);
+  }
+  if (AUTO_VERSION_REVIEW) {
+    const state = readVersionState();
+    if (state.sha && state.verifiedSha !== state.sha) runAutoVersionReview(state.sha);
   }
   await ensureDesiredServices();
   await tg.send('🤖 <b>Kintara Bot online!</b> Type /help to see the command list.').catch(() => {});
