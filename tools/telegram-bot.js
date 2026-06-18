@@ -345,29 +345,152 @@ async function hSpinner() {
     `🎒 Backpack: 🪵 ${bp.wood || 0} | 🪨 ${bp.stone || 0} | ⚫ ${bp.coal || 0} | 🔩 ${bp.metal || 0} | 🪙 ${bp.gold || 0}` +
     `${tickerLine}\n\n<i>Free spin reset tiap 12 jam.</i>`;
 }
+
+const MARKET_ITEMS = [
+  ['fish', '🎣 fish'],
+  ['cooked_fish_meat', '🍳 cooked'],
+  ['wood', '🪵 wood'],
+  ['stone', '🪨 stone'],
+  ['coal', '⬛ coal'],
+  ['metal', '🔩 metal'],
+  ['gold', '🪙 gold'],
+];
+const ITEM_LABEL = Object.fromEntries(MARKET_ITEMS.map(([k, v]) => [k, v]));
+
+let mkSession = null;
+function mkReset() { mkSession = null; }
+
 async function hMarket() {
   const authErr = await ensureLoginOk();
   if (authErr) return authErr;
   const c = await client();
-  const items = [
-    ['fish', '🎣 fish'],
-    ['cooked_fish_meat', '🍳 cooked'],
-    ['wood', '🪵 wood'],
-    ['stone', '🪨 stone'],
-    ['coal', '⬛ coal'],
-    ['metal', '🔩 metal'],
-  ];
-  const lines = ['🛒 <b>Marketplace</b>'];
-  for (const [itemType, label] of items) {
+  const lines = ['🛍 <b>Marketplace — Harga Live</b>', ''];
+  for (const [itemType, label] of MARKET_ITEMS) {
+    if (itemType === 'gold') continue;
     try {
       const r = await c.marketplaceStats(itemType);
       const last = Array.isArray(r?.samples) && r.samples.length ? r.samples[r.samples.length - 1] : null;
-      lines.push(`${label}: avg30d ${r?.avg30d ?? '?'}g | last ${last?.avgUnitPrice ?? '?'}g | sales ${last?.sales ?? 0}`);
+      lines.push(`${label} — avg30d <b>${r?.avg30d ?? '?'}g</b> | last ${last?.avgUnitPrice ?? '?'}g | sales ${last?.sales ?? 0}`);
     } catch (e) {
-      lines.push(`${label}: err ${e.message.slice(0, 40)}`);
+      lines.push(`${label} — err ${e.message.slice(0, 30)}`);
     }
   }
-  return lines.join('\n');
+  let kins = '?';
+  try { const t = await c.tokenBlimpStats(); kins = `$${Number(t.priceUsd).toFixed(6)}`; } catch {}
+  lines.push('', `🪙 $KINS: <b>${kins}</b>`, '', '<i>Pilih aksi — Sell (gold/$KINS) atau Buy dari listing live.</i>');
+  mkReset();
+  await tg.send(lines.join('\n'), {
+    buttons: [[{ text: '💰 SELL', data: 'mk:sell' }, { text: '🛒 BUY', data: 'mk:buy' }]],
+  });
+  return null;
+}
+
+async function mkShowInventory(ctx) {
+  const c = await client();
+  const me = await c.me(); const bp = me.backpack || {};
+  const rows = [];
+  // Marketplace sell hanya menerima item yang menempati inv slot (bukan resource bulk).
+  (bp.invSlots || []).forEach((sl, i) => {
+    if (sl && sl.t) {
+      const lbl = ITEM_LABEL[sl.t] || sl.t;
+      rows.push({ text: `${lbl} (${sl.n || 1})`, data: `mk:itm:${i}` });
+    }
+  });
+  if (!rows.length) {
+    await tg.editMessage(ctx.chatId, ctx.messageId, '🎒 Nggak ada item di inventory slot yang bisa dijual.\n\n<i>Resource bulk (stone/wood/fish) belum bisa di-list lewat Marketplace — harus jadi item di slot dulu.</i>', { buttons: [[{ text: '⬅️ Kembali', data: 'mk:back' }]] });
+    return;
+  }
+  const grid = [];
+  for (let i = 0; i < rows.length; i += 2) grid.push(rows.slice(i, i + 2));
+  grid.push([{ text: '⬅️ Kembali', data: 'mk:back' }]);
+  mkSession = { mode: 'sell', step: 'pick-item' };
+  await tg.editMessage(ctx.chatId, ctx.messageId, '💰 <b>SELL</b> — pilih item:', { buttons: grid });
+}
+async function mkPickCurrency(slotIdx, ctx) {
+  const c = await client();
+  const me = await c.me(); const sl = (me.backpack?.invSlots || [])[Number(slotIdx)];
+  if (!sl || !sl.t) { await tg.editMessage(ctx.chatId, ctx.messageId, '⚠️ Slot kosong, pilih ulang.', { buttons: [[{ text: '⬅️ Kembali', data: 'mk:sell' }]] }); return; }
+  mkSession = { mode: 'sell', slotIndex: Number(slotIdx), item: sl.t, step: 'pick-currency' };
+  await tg.editMessage(ctx.chatId, ctx.messageId,
+    `💰 <b>SELL ${ITEM_LABEL[sl.t] || sl.t}</b> (punya ${sl.n || 1})\nJual pakai mata uang apa?`,
+    { buttons: [[{ text: '🪙 Gold', data: 'mk:cur:gold' }, { text: '🪙 $KINS', data: 'mk:cur:token' }], [{ text: '⬅️ Kembali', data: 'mk:sell' }]] });
+}
+async function mkAskQtyPrice(currency, ctx) {
+  if (!mkSession || !mkSession.item) { await tg.send('⚠️ Sesi habis, /market lagi ya.'); return; }
+  mkSession = { mode: 'sell', item: mkSession.item, slotIndex: mkSession.slotIndex, currency, step: 'await-input' };
+  const unit = currency === 'token' ? 'USD (total listing)' : 'gold (per unit)';
+  await tg.editMessage(ctx.chatId, ctx.messageId,
+    `💰 <b>SELL ${ITEM_LABEL[mkSession.item] || mkSession.item}</b> — ${currency === 'token' ? '$KINS' : 'Gold'}\n\n` +
+    `Ketik: <code>qty harga</code>\nContoh: <code>1 25</code>\n\n• qty = jumlah\n• harga = ${unit}`,
+    { buttons: [[{ text: '❌ Batal', data: 'mk:back' }]] });
+}
+
+async function mkSubmitListing(text) {
+  const m = text.trim().split(/\s+/);
+  const qty = parseInt(m[0], 10); const price = Number(m[1]);
+  if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) {
+    return '⚠️ Format salah. Ketik: <code>qty harga</code> (contoh <code>1 25</code>).';
+  }
+  const { item, currency, slotIndex } = mkSession;
+  const c = await client();
+  const me = await c.me(); const sl = (me.backpack?.invSlots || [])[slotIndex];
+  if (!sl || sl.t !== item) { mkReset(); return '⚠️ Item di slot berubah, /market lagi ya.'; }
+  const have = sl.n || 1;
+  if (have < qty) { mkReset(); return `⚠️ Stok kurang: punya ${have} ${ITEM_LABEL[item] || item}, mau jual ${qty}.`; }
+  const payload = { itemType: item, slotKind: 'inv', slotIndex, quantity: qty, currency };
+  if (currency === 'token') payload.priceUsd = price; else payload.priceGold = price;
+  try {
+    const r = await c.marketplaceSell(payload);
+    mkReset();
+    if (r && r.ok === false) return `❌ Listing ditolak: ${JSON.stringify(r).slice(0, 120)}`;
+    const curLabel = currency === 'token' ? `$${price} (≈$KINS)` : `${price}g/unit`;
+    return `✅ <b>Listed!</b>\n${ITEM_LABEL[item] || item} x${qty} @ ${curLabel}\n\n<i>${currency === 'token' ? '$KINS masuk wallet pas ada buyer (95% kamu / 5% treasury).' : 'Dibayar gold pas ada buyer.'}</i>`;
+  } catch (e) {
+    mkReset();
+    const msg = (e.message || '').toLowerCase();
+    if (msg.includes('seller_skill_too_low')) return '🔒 Level skill kamu belum cukup buat jual item ini di Marketplace. Grind dulu bang.';
+    if (msg.includes('bad_slot')) return '⚠️ Resource bulk nggak bisa di-list langsung — cuma item di inv slot.';
+    return `❌ Gagal listing: ${(e.message || '').slice(0, 120)}`;
+  }
+}
+async function mkShowBuy(ctx) {
+  const c = await client();
+  let arr = [];
+  try { const Lst = await c.marketplaceListings({ limit: 12 }); arr = Lst.listings || Lst.items || Lst.data || []; } catch (e) {
+    await tg.editMessage(ctx.chatId, ctx.messageId, `⚠️ Gagal ambil listing: ${e.message.slice(0, 50)}`, { buttons: [[{ text: '⬅️ Kembali', data: 'mk:back' }]] });
+    return;
+  }
+  if (!arr.length) { await tg.editMessage(ctx.chatId, ctx.messageId, '🛒 Belum ada listing aktif.', { buttons: [[{ text: '⬅️ Kembali', data: 'mk:back' }]] }); return; }
+  const lines = ['🛒 <b>BUY — Listing Live</b>', ''];
+  for (const x of arr.slice(0, 12)) {
+    const it = x.itemType || x.item; const lbl = ITEM_LABEL[it] || it;
+    if (x.currency === 'token' || x.currency === 'kins') lines.push(`${lbl} x${x.quantity} — <b>$${x.priceUsd ?? '?'}</b> ($KINS) • ${x.sellerName || '?'}`);
+    else lines.push(`${lbl} x${x.quantity} — <b>${x.priceGold ?? '?'}g</b> • ${x.sellerName || '?'}`);
+  }
+  lines.push('', '<i>⚠️ Beli listing $KINS butuh sign tx on-chain dari wallet — lakukan di web game. Listing gold dibeli in-game.</i>');
+  await tg.editMessage(ctx.chatId, ctx.messageId, lines.join('\n'), { buttons: [[{ text: '⬅️ Kembali', data: 'mk:back' }]] });
+}
+
+async function onMarketCallback(data, ctx) {
+  if (!data.startsWith('mk:')) return;
+  const rest = data.slice(3);
+  if (rest === 'sell') return mkShowInventory(ctx);
+  if (rest === 'buy') return mkShowBuy(ctx);
+  if (rest === 'back') {
+    mkReset();
+    return tg.editMessage(ctx.chatId, ctx.messageId, '🛍 <b>Marketplace</b> — pilih aksi:', { buttons: [[{ text: '💰 SELL', data: 'mk:sell' }, { text: '🛒 BUY', data: 'mk:buy' }]] });
+  }
+  if (rest.startsWith('itm:')) return mkPickCurrency(rest.slice(4), ctx);
+  if (rest.startsWith('cur:')) return mkAskQtyPrice(rest.slice(4), ctx);
+}
+
+async function onMarketText(text) {
+  if (mkSession && mkSession.step === 'await-input') {
+    const reply = await mkSubmitListing(text);
+    if (reply) await tg.send(reply);
+    return true;
+  }
+  return false;
 }
 async function hQuest() {
   const c = await client(); const q = await c.dailyQuestProgress().catch(() => ({}));
@@ -538,7 +661,7 @@ async function syncMenu() {
   let nextVersionPollAt = Date.now() + VERSION_POLL_MS;
   let nextKeepaliveAt = Date.now() + KEEPALIVE_POLL_MS;
   for (;;) {
-    try { await tg.pollCommands(commands); } catch (e) { console.error('poll err', e.message); }
+    try { await tg.pollCommands(commands, { onCallback: onMarketCallback, onText: onMarketText }); } catch (e) { console.error('poll err', e.message); }
     if (Date.now() >= nextVersionPollAt) {
       await maybeNotifyVersionChange();
       nextVersionPollAt = Date.now() + VERSION_POLL_MS;
