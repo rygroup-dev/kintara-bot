@@ -221,6 +221,28 @@ function readVersionState() { return readJson(VERSION_STATEFILE) || {}; }
 function saveVersionState(data) {
   try { fs.writeFileSync(VERSION_STATEFILE, JSON.stringify({ ...data, checkedAt: Date.now() }, null, 2)); } catch {}
 }
+function markVersionVerified(sha, notes = []) {
+  const prev = readVersionState();
+  saveVersionState({
+    ...prev,
+    sha: sha || prev.sha || null,
+    verifiedSha: sha || prev.sha || null,
+    verifiedAt: Date.now(),
+    verifiedNotes: Array.isArray(notes) ? notes.filter(Boolean) : [],
+  });
+}
+function versionVerificationSummary(state, currentSha) {
+  if (!state?.verifiedSha || !currentSha || state.verifiedSha !== currentSha) {
+    return 'compat: review pending';
+  }
+  const at = state.verifiedAt
+    ? new Date(state.verifiedAt).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+    : 'unknown';
+  const notes = Array.isArray(state.verifiedNotes) && state.verifiedNotes.length
+    ? ` • ${state.verifiedNotes.join(', ')}`
+    : '';
+  return `compat: verified ${String(currentSha).slice(0, 8)} @ ${at}${notes}`;
+}
 async function fetchGameVersion() {
   const c = await client();
   const v = await c.version().catch(() => ({}));
@@ -237,6 +259,9 @@ async function maybeNotifyVersionChange() {
       previousSha: changed ? prev.sha : (prev.previousSha || null),
       lastChangedAt: changed ? Date.now() : (prev.lastChangedAt || null),
       notifiedSha: changed ? current.sha : (prev.notifiedSha || null),
+      verifiedSha: changed ? null : (prev.verifiedSha || null),
+      verifiedAt: changed ? null : (prev.verifiedAt || null),
+      verifiedNotes: changed ? [] : (prev.verifiedNotes || []),
     });
     if (prev.sha && prev.sha !== current.sha) {
       clearDesired('fish', 'gather', 'auto', 'combat');
@@ -564,15 +589,20 @@ async function hVersion() {
     previousSha: changed ? prev.sha : (prev.previousSha || null),
     lastChangedAt: changed ? Date.now() : (prev.lastChangedAt || null),
     notifiedSha: changed ? current.sha : (prev.notifiedSha || null),
+    verifiedSha: changed ? null : (prev.verifiedSha || null),
+    verifiedAt: changed ? null : (prev.verifiedAt || null),
+    verifiedNotes: changed ? [] : (prev.verifiedNotes || []),
   });
+  const next = readVersionState();
   const active = [
     pidOf(OPIDFILE) ? 'auto' : null,
     botPid() ? 'fish' : null,
     gatherPid() ? 'gather' : null,
     combatPid() ? 'combat' : null,
   ].filter(Boolean);
-  const changedAt = prev.lastChangedAt ? new Date(prev.lastChangedAt).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '-';
-  return `🧩 <b>Game Version</b>\ncurrent: ${current.sha || '?'}\nprevious: ${prev.previousSha || prev.sha || current.sha || '?'}\nlast change: ${changedAt}\nwatch: auto-detect ON (${Math.round(VERSION_POLL_MS / 60000)}m)\nautomation: ${active.length ? active.join(', ') : 'idle'}`;
+  const changedAt = next.lastChangedAt ? new Date(next.lastChangedAt).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '-';
+  const compat = versionVerificationSummary(next, current.sha);
+  return `🧩 <b>Game Version</b>\ncurrent: ${current.sha || '?'}\nprevious: ${next.previousSha || next.sha || current.sha || '?'}\nlast change: ${changedAt}\n${compat}\nwatch: auto-detect ON (${Math.round(VERSION_POLL_MS / 60000)}m)\nautomation: ${active.length ? active.join(', ') : 'idle'}`;
 }
 async function hDiag() {
   const authErr = await ensureLoginOk();
@@ -613,6 +643,7 @@ async function hDiag() {
   ];
   const vs = readVersionState();
   if (vs.sha) lines.push(`🧩 ver: ${String(vs.sha).slice(0, 8)}`);
+  lines.push(`✅ ${versionVerificationSummary(vs, vs.sha)}`);
   if (lastErr) lines.push(`⚠️ last err: ${lastErr.code} @ ${lastErr.context} (${lastErr.count}x)`);
   return lines.join('\n');
 }
@@ -718,6 +749,10 @@ async function syncMenu() {
   syncDesiredFromLive();
   await syncMenu();
   await maybeNotifyVersionChange();
+  if (process.env.KINTARA_VERIFY_CURRENT_SHA === '1') {
+    const current = await fetchGameVersion();
+    if (current.sha) markVersionVerified(current.sha, ['rest', 'presence', 'gather']);
+  }
   await ensureDesiredServices();
   await tg.send('🤖 <b>Kintara Bot online!</b> Type /help to see the command list.').catch(() => {});
   console.log('[telegram-bot] polling...');
