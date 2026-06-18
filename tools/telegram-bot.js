@@ -493,11 +493,13 @@ async function hStatus() {
       boot: 'boot',
       prep: 'prep',
       queue: cs.queueAhead != null ? `queue ${cs.queueAhead}` : 'queue',
+      requeue_after_death: cs.queueAhead != null ? `requeue after death ${cs.queueAhead}` : 'requeue after death',
       presence: 'presence',
       wild: 'wild',
       hunt: 'hunt',
       retreat: 'retreat',
       exit: 'exit',
+      dead: 'dead',
       reconnect: 'reconnect',
     };
     const phaseLabel = cs.phase ? (phaseMap[cs.phase] || cs.phase) : null;

@@ -161,7 +161,13 @@ async function tryPotion(p, type) {
 async function survivalCheck(p) {
   const hp = p.hp | 0;
   stats.hp = hp;
-  if (hp <= 0) { stats.deaths++; log('💀 HP 0 — died (loot already banked = safe)'); return 'dead'; }
+  if (hp <= 0) {
+    stats.deaths++;
+    stats.phase = 'dead';
+    saveState();
+    log('💀 HP 0 — died (loot already banked = safe)');
+    return 'dead';
+  }
   // kritis: bail ke safe camp
   if (hp <= RETREAT_HP) {
     if (healthLeft <= 0 && shieldLeft <= 0) { log(`🩸 HP ${hp} kritis & potion habis — RETREAT+EXIT`); return 'retreat'; }
@@ -292,7 +298,7 @@ async function connectWithRetry() {
       const p = new Presence(SHARD);
       p.on('log', (m) => log('[ws] ' + m));
       p.on('queue', (d) => {
-        stats.phase = 'queue';
+        stats.phase = (stats.hp | 0) <= 0 && stats.deaths > 0 ? 'requeue_after_death' : 'queue';
         stats.queueAhead = Number.isFinite(Number(d?.ahead)) ? Number(d.ahead) : null;
         saveState();
         if (d.ahead % 5 === 0) log('queue ahead=' + d.ahead);
