@@ -524,6 +524,10 @@ const ITEM_LABEL = Object.fromEntries(MARKET_ITEMS.map(([k, v]) => [k, v]));
 
 let mkSession = null;
 function mkReset() { mkSession = null; }
+function marketSellSafetyWarning() {
+  if (!botPid() && !gatherPid() && !combatPid() && !pidOf(OPIDFILE)) return '';
+  return '<i>Warning: a bot is currently running. Selling while automation is active may fail if inventory slots change. For the safest sell flow, use /stop first.</i>\n\n';
+}
 
 async function hMarket() {
   const authErr = await ensureLoginOk();
@@ -569,7 +573,7 @@ async function mkShowInventory(ctx) {
   for (let i = 0; i < rows.length; i += 2) grid.push(rows.slice(i, i + 2));
   grid.push([{ text: '⬅️ Back', data: 'mk:back' }]);
   mkSession = { mode: 'sell', step: 'pick-item' };
-  await tg.editMessage(ctx.chatId, ctx.messageId, '💰 <b>SELL</b> — choose an item:', { buttons: grid });
+  await tg.editMessage(ctx.chatId, ctx.messageId, `${marketSellSafetyWarning()}💰 <b>SELL</b> — choose an item:`, { buttons: grid });
 }
 async function mkPickCurrency(slotIdx, ctx) {
   const c = await client();
@@ -577,7 +581,7 @@ async function mkPickCurrency(slotIdx, ctx) {
   if (!sl || !sl.t) { await tg.editMessage(ctx.chatId, ctx.messageId, '⚠️ Slot is empty, please choose again.', { buttons: [[{ text: '⬅️ Back', data: 'mk:sell' }]] }); return; }
   mkSession = { mode: 'sell', slotIndex: Number(slotIdx), item: sl.t, step: 'pick-currency' };
   await tg.editMessage(ctx.chatId, ctx.messageId,
-    `💰 <b>SELL ${ITEM_LABEL[sl.t] || sl.t}</b> (you have ${sl.n || 1})\nWhich currency do you want to use?`,
+    `${marketSellSafetyWarning()}💰 <b>SELL ${ITEM_LABEL[sl.t] || sl.t}</b> (you have ${sl.n || 1})\nWhich currency do you want to use?`,
     { buttons: [[{ text: '🪙 Gold', data: 'mk:cur:gold' }, { text: '🪙 $KINS', data: 'mk:cur:token' }], [{ text: '⬅️ Back', data: 'mk:sell' }]] });
 }
 async function mkAskQtyPrice(currency, ctx) {
@@ -585,7 +589,7 @@ async function mkAskQtyPrice(currency, ctx) {
   mkSession = { mode: 'sell', item: mkSession.item, slotIndex: mkSession.slotIndex, currency, step: 'await-input' };
   const unit = currency === 'token' ? 'USD (total listing)' : 'gold (per unit)';
   await tg.editMessage(ctx.chatId, ctx.messageId,
-    `💰 <b>SELL ${ITEM_LABEL[mkSession.item] || mkSession.item}</b> — ${currency === 'token' ? '$KINS' : 'Gold'}\n\n` +
+    `${marketSellSafetyWarning()}💰 <b>SELL ${ITEM_LABEL[mkSession.item] || mkSession.item}</b> — ${currency === 'token' ? '$KINS' : 'Gold'}\n\n` +
     `Type: <code>qty price</code>\nExample: <code>1 25</code>\n\n• qty = quantity\n• price = ${unit}`,
     { buttons: [[{ text: '❌ Cancel', data: 'mk:back' }]] });
 }
