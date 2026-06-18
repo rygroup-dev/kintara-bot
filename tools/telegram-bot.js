@@ -97,6 +97,12 @@ function procAgeMin(f) {
   if (!p?.started) return null;
   return Math.round((Date.now() - p.started) / 60000);
 }
+function isFreshState(state, maxAgeMs = 20 * 60 * 1000) {
+  if (!state || typeof state !== 'object') return false;
+  const started = Number(state.started);
+  if (!Number.isFinite(started) || started <= 0) return false;
+  return (Date.now() - started) <= maxAgeMs;
+}
 function scriptPath(script) {
   return path.join(ROOT, 'tools', script);
 }
@@ -254,7 +260,7 @@ async function hStatus() {
   const fr = botPid(), gr = gatherPid(), cb = combatPid(), or = pidOf(OPIDFILE);
   const gatherMeta = readJson(GPIDFILE) || {};
   const gatherState = readJson(path.join(OUT, 'gather-state.json'));
-  const gatherKind = gatherState?.kind || gatherMeta?.kind || 'all';
+  const gatherKind = gatherMeta?.kind || gatherState?.kind || 'all';
   const gLbl = gatherKind === 'rock' ? '⛏ Mining' : gatherKind === 'tree' ? '🪓 Wood' : '🪓⛏ Gather';
   const orch = readJson(path.join(OUT, 'orchestrator-state.json'));
   const active = cb ? 'combat' : gr ? 'gather' : fr ? 'fish' : or ? (orch?.current || 'auto') : 'idle';
@@ -286,9 +292,9 @@ async function hStatus() {
   const cs = readJson(path.join(OUT, 'combat-state.json'));
   lines.push('');
   lines.push('📦 <b>Session</b>');
-  if (s) lines.push(`🎣 fish ${s.ok || 0}/${s.casts || 0} | 🎒 ${s.fish || 0} | 🍳 ${s.cooked || 0} | 💰 ${s.sold || 0} | ⏱ ${fmtAgeMin(s.ageMin)}`);
-  if (g) lines.push(`🪓 felled ${g.felled || 0} | 🪵 ${g.wood || 0} (+${g.gainedWood || 0}) | 🪨 ${g.stone || 0} (+${g.gainedStone || 0}) | ⬛ ${g.coal || 0} (+${g.gainedCoal || 0}) | 🔩 ${g.metal || 0} (+${g.gainedMetal || 0}) | ⏱ ${fmtAgeMin(g.ageMin)}`);
-  if (cs) {
+  if (fr && s && isFreshState(s)) lines.push(`🎣 fish ${s.ok || 0}/${s.casts || 0} | 🎒 ${s.fish || 0} | 🍳 ${s.cooked || 0} | 💰 ${s.sold || 0} | ⏱ ${fmtAgeMin(s.ageMin)}`);
+  if (gr && g && isFreshState(g, 60 * 60 * 1000)) lines.push(`🪓 felled ${g.felled || 0} | 🪵 ${g.wood || 0} (+${g.gainedWood || 0}) | 🪨 ${g.stone || 0} (+${g.gainedStone || 0}) | ⬛ ${g.coal || 0} (+${g.gainedCoal || 0}) | 🔩 ${g.metal || 0} (+${g.gainedMetal || 0}) | ⏱ ${fmtAgeMin(g.ageMin)}`);
+  if (cb && cs && isFreshState(cs, 60 * 60 * 1000)) {
     const phaseMap = {
       boot: 'boot',
       prep: 'prep',
@@ -302,6 +308,9 @@ async function hStatus() {
     };
     const phaseLabel = cs.phase ? (phaseMap[cs.phase] || cs.phase) : null;
     lines.push(`⚔️ kill ${cs.kills || 0} | 🗡️ ${cs.hits || 0} | 📈 +${cs.combatGain || 0}XP | ❤️ ${cs.hp || 0} | 🧪 ${cs.potionsHealth || 0}H/${cs.potionsShield || 0}S | 🏃 ${cs.retreats || 0}${phaseLabel ? ` | 📍 ${phaseLabel}` : ''} | ⏱ ${fmtAgeMin(cs.ageMin)}`);
+  }
+  if (!(fr && s && isFreshState(s)) && !(gr && g && isFreshState(g, 60 * 60 * 1000)) && !(cb && cs && isFreshState(cs, 60 * 60 * 1000))) {
+    lines.push('No fresh session stats yet for the currently running activity.');
   }
   return lines.join('\n');
 }
