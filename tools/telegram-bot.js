@@ -623,6 +623,11 @@ function marketSellSafetyWarning() {
   if (!botPid() && !gatherPid() && !combatPid() && !pidOf(OPIDFILE)) return '';
   return '<i>Warning: a bot is currently running. Selling while automation is active may fail if inventory slots change. For the safest sell flow, use /stop first.</i>\n\n';
 }
+function fmtMarketNum(v, digits = 2) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '?';
+  return n.toFixed(digits).replace(/\.?0+$/, '');
+}
 
 async function hMarket() {
   const authErr = await ensureLoginOk();
@@ -634,7 +639,7 @@ async function hMarket() {
     try {
       const r = await c.marketplaceStats(itemType);
       const last = Array.isArray(r?.samples) && r.samples.length ? r.samples[r.samples.length - 1] : null;
-      lines.push(`${label} — avg30d <b>${r?.avg30d ?? '?'}g</b> | last ${last?.avgUnitPrice ?? '?'}g | sales ${last?.sales ?? 0}`);
+      lines.push(`${label} — avg30d <b>${fmtMarketNum(r?.avg30d)}g/unit</b> | last ${fmtMarketNum(last?.avgUnitPrice)}g/unit | sales ${last?.sales ?? 0}`);
     } catch (e) {
       lines.push(`${label} — err ${e.message.slice(0, 30)}`);
     }
@@ -688,9 +693,20 @@ async function mkAskQtyPrice(currency, ctx) {
   if (!mkSession || !mkSession.item) { await tg.send('⚠️ Session expired, please run /market again.'); return; }
   mkSession = { mode: 'sell', item: mkSession.item, slotIndex: mkSession.slotIndex, currency, step: 'await-input' };
   const unit = currency === 'token' ? 'USD (total listing)' : 'gold (total listing, whole number)';
+  let hint = '';
+  if (currency === 'gold') {
+    try {
+      const c = await client();
+      const st = await c.marketplaceStats(mkSession.item);
+      const unitAvg = Number(st?.avg30d);
+      if (Number.isFinite(unitAvg) && unitAvg > 0) {
+        hint = `\n\n📈 Market avg right now: <b>${fmtMarketNum(unitAvg)}g/unit</b>\nExample at market rate: <code>200 ${Math.max(1, Math.round(unitAvg * 200))}</code> = 200 items for about ${fmtMarketNum(unitAvg * 200)}g total (rounded for server rules).`;
+      }
+    } catch {}
+  }
   await tg.editMessage(ctx.chatId, ctx.messageId,
     `${marketSellSafetyWarning()}💰 <b>SELL ${ITEM_LABEL[mkSession.item] || mkSession.item}</b> — ${currency === 'token' ? '$KINS' : 'Gold'}\n\n` +
-    `Type: <code>qty price</code>\nExample: <code>200 2</code>\n\n• qty = quantity\n• price = ${unit}`,
+    `Type: <code>qty price</code>\nExample: <code>200 2</code>\n\n• qty = quantity\n• price = ${unit}${hint}`,
     { buttons: [[{ text: '❌ Cancel', data: 'mk:back' }]] });
 }
 
