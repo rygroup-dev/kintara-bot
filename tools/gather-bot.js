@@ -16,6 +16,7 @@ const gs = require('../lib/gameState');
 const KIND = process.argv[2] || 'tree';
 const SHARD = process.argv[3] || config.shard || 's4';
 const OUT = path.join(__dirname, '..', 'recon');
+const PIDFILE = path.join(OUT, 'control', 'gatherbot.pid');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'gather.log'), s + '\n'); };
 const lt = {}; const logT = (k, m, ms = 30000) => { const n = Date.now(); if (!lt[k] || n - lt[k] > ms) { lt[k] = n; log(m); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -121,7 +122,10 @@ async function gatherLoop(p) {
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
+  fs.mkdirSync(path.join(OUT, 'control'), { recursive: true });
   fs.writeFileSync(path.join(OUT, 'gather.log'), '');
+  fs.writeFileSync(PIDFILE, JSON.stringify({ pid: process.pid, kind: KIND, shard: SHARD, started: Date.now() }));
+  process.on('exit', () => { try { fs.unlinkSync(PIDFILE); } catch {} });
   saveState({ phase: 'boot', queueAhead: null, region: 'world' });
   const { client: c, player } = await KintaraClient.create(); cli = c;
   log('GATHER BOT START kind=' + KIND + ' pid=' + player?.id);

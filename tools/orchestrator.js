@@ -113,13 +113,19 @@ async function pickShard() {
 async function ensureOnly(activity) {
   // pastikan cuma `activity` yg jalan
   const fp = pidOf(FPID), gp = pidOf(GPID), combatPid = pidOf(CPID);
+  const gatherMeta = readJson(GPID);
   if (combatPid) { try { process.kill(combatPid, 'SIGKILL'); } catch {} safeUnlink(CPID); safeUnlink(CSTATE); }
   if (activity === 'fish') {
     if (gp) { try { process.kill(gp, 'SIGKILL'); } catch {} safeUnlink(GPID); safeUnlink(GSTATE); }
     if (!pidOf(FPID)) { const shard = await pickShard(); const pid = spawnDetached('bot-headless.js', [shard], FPID); log('▶️ START fishing (pid ' + pid + ') shard=' + shard); }
   } else if (activity === 'gather') {
     if (fp) { try { process.kill(fp, 'SIGKILL'); } catch {} safeUnlink(FPID); safeUnlink(FSTATE); }
-    if (!pidOf(GPID)) { const shard = await pickShard(); const pid = spawnDetached('gather-bot.js', ['all', shard], GPID); log('▶️ START gather-all (pid ' + pid + ') shard=' + shard); }
+    if (gp && gatherMeta?.kind && gatherMeta.kind !== 'all') {
+      try { process.kill(gp, 'SIGKILL'); } catch {}
+      safeUnlink(GPID);
+      safeUnlink(GSTATE);
+    }
+    if (!pidOf(GPID)) { const shard = await pickShard(); const pid = spawnDetached('gather-bot.js', ['all', shard], GPID, { kind: 'all', shard }); log('▶️ START gather-all (pid ' + pid + ') shard=' + shard); }
   }
 }
 
