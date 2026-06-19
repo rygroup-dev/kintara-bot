@@ -628,6 +628,9 @@ function fmtMarketNum(v, digits = 2) {
   if (!Number.isFinite(n)) return '?';
   return n.toFixed(digits).replace(/\.?0+$/, '');
 }
+function roundMarketTotal(v) {
+  return Math.max(1, Math.round(Number(v) || 0));
+}
 
 async function hMarket() {
   const authErr = await ensureLoginOk();
@@ -684,14 +687,14 @@ async function mkPickCurrency(slotIdx, ctx) {
   const c = await client();
   const me = await c.me(); const sl = (me.backpack?.invSlots || [])[Number(slotIdx)];
   if (!sl || !sl.t) { await tg.editMessage(ctx.chatId, ctx.messageId, '⚠️ Slot is empty, please choose again.', { buttons: [[{ text: '⬅️ Back', data: 'mk:sell' }]] }); return; }
-  mkSession = { mode: 'sell', slotIndex: Number(slotIdx), item: sl.t, step: 'pick-currency' };
+  mkSession = { mode: 'sell', slotIndex: Number(slotIdx), item: sl.t, have: Number(sl.n || 1), step: 'pick-currency' };
   await tg.editMessage(ctx.chatId, ctx.messageId,
     `${marketSellSafetyWarning()}💰 <b>SELL ${ITEM_LABEL[sl.t] || sl.t}</b> (you have ${sl.n || 1})\nWhich currency do you want to use?`,
     { buttons: [[{ text: '🪙 Gold', data: 'mk:cur:gold' }, { text: '🪙 $KINS', data: 'mk:cur:token' }], [{ text: '⬅️ Back', data: 'mk:sell' }]] });
 }
 async function mkAskQtyPrice(currency, ctx) {
   if (!mkSession || !mkSession.item) { await tg.send('⚠️ Session expired, please run /market again.'); return; }
-  mkSession = { mode: 'sell', item: mkSession.item, slotIndex: mkSession.slotIndex, currency, step: 'await-input' };
+  mkSession = { mode: 'sell', item: mkSession.item, slotIndex: mkSession.slotIndex, have: mkSession.have, currency, step: 'await-input' };
   const unit = currency === 'token' ? 'USD (total listing)' : 'gold (total listing, whole number)';
   let hint = '';
   if (currency === 'gold') {
@@ -700,7 +703,17 @@ async function mkAskQtyPrice(currency, ctx) {
       const st = await c.marketplaceStats(mkSession.item);
       const unitAvg = Number(st?.avg30d);
       if (Number.isFinite(unitAvg) && unitAvg > 0) {
-        hint = `\n\n📈 Market avg right now: <b>${fmtMarketNum(unitAvg)}g/unit</b>\nExample at market rate: <code>200 ${Math.max(1, Math.round(unitAvg * 200))}</code> = 200 items for about ${fmtMarketNum(unitAvg * 200)}g total (rounded for server rules).`;
+        const haveQty = Number(mkSession.have || 1);
+        const fast = roundMarketTotal(unitAvg * haveQty * 0.75);
+        const normal = roundMarketTotal(unitAvg * haveQty);
+        const premium = roundMarketTotal(unitAvg * haveQty * 1.25);
+        hint =
+          `\n\n📈 Market avg right now: <b>${fmtMarketNum(unitAvg)}g/unit</b>` +
+          `\nFor your current stack <b>${haveQty}</b>:` +
+          `\n• fast sell: <code>${haveQty} ${fast}</code>` +
+          `\n• normal: <code>${haveQty} ${normal}</code>` +
+          `\n• premium: <code>${haveQty} ${premium}</code>` +
+          `\n\nYou can also type any custom total you want: <code>qty price</code>.`;
       }
     } catch {}
   }
