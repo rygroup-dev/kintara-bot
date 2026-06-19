@@ -291,6 +291,12 @@ async function ensureDesiredServices() {
   for (const [name, meta] of Object.entries(state)) {
     const spec = await desiredServiceSpec(name, meta);
     if (!spec) continue;
+    if (name === 'gather' && pidOf(spec.pidfile)) {
+      const liveMeta = readJson(spec.pidfile) || {};
+      if ((liveMeta.kind || 'tree') !== (meta.kind || 'tree')) {
+        stopMainService('gather');
+      }
+    }
     if (pidOf(spec.pidfile)) continue;
     const pid = spawnBot(spec.script, spec.args, spec.pidfile);
     if (name === 'gather') {
