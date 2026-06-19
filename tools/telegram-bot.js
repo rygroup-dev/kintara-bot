@@ -682,10 +682,10 @@ async function mkPickCurrency(slotIdx, ctx) {
 async function mkAskQtyPrice(currency, ctx) {
   if (!mkSession || !mkSession.item) { await tg.send('⚠️ Session expired, please run /market again.'); return; }
   mkSession = { mode: 'sell', item: mkSession.item, slotIndex: mkSession.slotIndex, currency, step: 'await-input' };
-  const unit = currency === 'token' ? 'USD (total listing)' : 'gold (per unit)';
+  const unit = currency === 'token' ? 'USD (total listing)' : 'gold (total listing, whole number)';
   await tg.editMessage(ctx.chatId, ctx.messageId,
     `${marketSellSafetyWarning()}💰 <b>SELL ${ITEM_LABEL[mkSession.item] || mkSession.item}</b> — ${currency === 'token' ? '$KINS' : 'Gold'}\n\n` +
-    `Type: <code>qty price</code>\nExample: <code>1 25</code>\n\n• qty = quantity\n• price = ${unit}`,
+    `Type: <code>qty price</code>\nExample: <code>200 2</code>\n\n• qty = quantity\n• price = ${unit}`,
     { buttons: [[{ text: '❌ Cancel', data: 'mk:back' }]] });
 }
 
@@ -701,13 +701,16 @@ async function mkSubmitListing(text) {
   if (!sl || sl.t !== item) { mkReset(); return '⚠️ The item in that slot changed. Please run /market again.'; }
   const have = sl.n || 1;
   if (have < qty) { mkReset(); return `⚠️ Not enough stock: you have ${have} ${ITEM_LABEL[item] || item}, but tried to sell ${qty}.`; }
+  if (currency === 'gold' && !Number.isInteger(price)) {
+    return '⚠️ Gold listing must use a whole-number total price. Example: <code>200 2</code> means 200 items for total 2 gold.';
+  }
   const payload = { itemType: item, slotKind: 'inv', slotIndex, quantity: qty, currency };
   if (currency === 'token') payload.priceUsd = price; else payload.priceGold = price;
   try {
     const r = await c.marketplaceSell(payload);
     mkReset();
     if (r && r.ok === false) return `❌ Listing rejected: ${JSON.stringify(r).slice(0, 120)}`;
-    const curLabel = currency === 'token' ? `$${price} (≈$KINS)` : `${price}g/unit`;
+    const curLabel = currency === 'token' ? `$${price} total (≈$KINS)` : `${price}g total`;
     return `✅ <b>Listed!</b>\n${ITEM_LABEL[item] || item} x${qty} @ ${curLabel}\n\n<i>${currency === 'token' ? '$KINS masuk wallet pas ada buyer (95% kamu / 5% treasury).' : 'Dibayar gold pas ada buyer.'}</i>`;
   } catch (e) {
     mkReset();

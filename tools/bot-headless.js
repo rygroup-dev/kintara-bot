@@ -137,9 +137,10 @@ async function sellExcess(itemType, reserve) {
     if (idx < 0 || have <= reserve) return;
     const qty = Math.min(have - reserve, 200);
     if (itemType === 'fish' && fishPrice <= 1) { try { const st = await cli.marketplaceStats('fish'); fishPrice = Math.max(1, Math.round((st?.avg30d || 1))); } catch {} }
-    const price = itemType === 'cooked_fish_meat' ? Math.max(2, fishPrice * 2) : fishPrice;
+    const unitPrice = itemType === 'cooked_fish_meat' ? Math.max(2, fishPrice * 2) : fishPrice;
+    const price = Math.max(1, Math.round(unitPrice * qty));
     const r = await cli.marketplaceSell({ itemType, slotKind: 'inv', slotIndex: idx, quantity: qty, currency: 'gold', priceGold: price });
-    if (r?.ok !== false) { stats.sold = (stats.sold || 0) + qty; log(`💰 jual ${qty} ${itemType} @${price}g (total terjual ${stats.sold})`); }
+    if (r?.ok !== false) { stats.sold = (stats.sold || 0) + qty; log(`💰 jual ${qty} ${itemType} @${price}g total (~${unitPrice}g/unit, total terjual ${stats.sold})`); }
   } catch (e) { logThrottle('sell', 'sell err: ' + (e.message || '').slice(0, 50)); }
 }
 
