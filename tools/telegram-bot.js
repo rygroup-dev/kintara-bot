@@ -240,7 +240,8 @@ function replaceMainDesired(service, entry) {
 function syncDesiredFromLive() {
   const state = normalizeDesiredState(readAutoreviveState());
   let dirty = false;
-  if (pidOf(OPIDFILE) && !state.auto) { state.auto = { updatedAt: Date.now() }; dirty = true; }
+  const manualDesired = !!(state.fish || state.gather || state.combat);
+  if (pidOf(OPIDFILE) && !state.auto && !manualDesired) { state.auto = { updatedAt: Date.now() }; dirty = true; }
   if (!state.auto) {
     if (botPid() && !state.fish) { state.fish = { updatedAt: Date.now() }; dirty = true; }
     if (gatherPid() && !state.gather) {
