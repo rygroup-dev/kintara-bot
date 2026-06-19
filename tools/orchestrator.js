@@ -26,9 +26,13 @@ const FPID = path.join(CTRL, 'fishbot.pid'), GPID = path.join(CTRL, 'gatherbot.p
 const CPID = path.join(CTRL, 'combatbot.pid');
 const OPID = path.join(CTRL, 'orch.pid');
 const STATEFILE = path.join(OUT, 'orchestrator-state.json');
+const FSTATE = path.join(OUT, 'bot-state.json');
+const GSTATE = path.join(OUT, 'gather-state.json');
+const CSTATE = path.join(OUT, 'combat-state.json');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ORCH ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'orchestrator.log'), s + '\n'); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+const safeUnlink = (f) => { try { fs.unlinkSync(f); } catch {} };
 const pidOf = (f) => {
   const p = readJson(f);
   if (!p?.pid) return null;
@@ -109,12 +113,12 @@ async function pickShard() {
 async function ensureOnly(activity) {
   // pastikan cuma `activity` yg jalan
   const fp = pidOf(FPID), gp = pidOf(GPID), combatPid = pidOf(CPID);
-  if (combatPid) { try { process.kill(combatPid, 'SIGKILL'); fs.unlinkSync(CPID); } catch {} }
+  if (combatPid) { try { process.kill(combatPid, 'SIGKILL'); } catch {} safeUnlink(CPID); safeUnlink(CSTATE); }
   if (activity === 'fish') {
-    if (gp) { try { process.kill(gp, 'SIGKILL'); fs.unlinkSync(GPID); } catch {} }
+    if (gp) { try { process.kill(gp, 'SIGKILL'); } catch {} safeUnlink(GPID); safeUnlink(GSTATE); }
     if (!pidOf(FPID)) { const shard = await pickShard(); const pid = spawnDetached('bot-headless.js', [shard], FPID); log('▶️ START fishing (pid ' + pid + ') shard=' + shard); }
   } else if (activity === 'gather') {
-    if (fp) { try { process.kill(fp, 'SIGKILL'); fs.unlinkSync(FPID); } catch {} }
+    if (fp) { try { process.kill(fp, 'SIGKILL'); } catch {} safeUnlink(FPID); safeUnlink(FSTATE); }
     if (!pidOf(GPID)) { const shard = await pickShard(); const pid = spawnDetached('gather-bot.js', ['all', shard], GPID); log('▶️ START gather-all (pid ' + pid + ') shard=' + shard); }
   }
 }

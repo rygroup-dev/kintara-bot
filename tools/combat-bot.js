@@ -28,6 +28,7 @@ const STATEFILE = path.join(OUT, 'combat-state.json');
 const LOGFILE = path.join(OUT, 'combat.log');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const retryDelayMs = (attempt, base = 5000, cap = 60000) => Math.min(cap, base * (2 ** Math.max(0, attempt - 1))) + Math.floor(Math.random() * 1500);
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}`; console.log(s); try { fs.appendFileSync(LOGFILE, s + '\n'); } catch {} };
 const lt = {}; const logT = (k, m, ms = 30000) => { const n = Date.now(); if (!lt[k] || n - lt[k] > ms) { lt[k] = n; log(m); } };
 
@@ -330,8 +331,12 @@ async function connectWithRetry() {
       return p;
     } catch (e) {
       if (isWalletBannedError(e)) throw e;
-      log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 60)} — retry 15s`);
-      await sleep(15000);
+      const waitMs = retryDelayMs(attempt);
+      stats.phase = 'reconnect_wait';
+      stats.queueAhead = null;
+      saveState();
+      log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 60)} — retry ${Math.ceil(waitMs / 1000)}s`);
+      await sleep(waitMs);
     }
   }
 }

@@ -19,6 +19,7 @@ const OUT = path.join(__dirname, '..', 'recon');
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}`; console.log(s); fs.appendFileSync(path.join(OUT, 'gather.log'), s + '\n'); };
 const lt = {}; const logT = (k, m, ms = 30000) => { const n = Date.now(); if (!lt[k] || n - lt[k] > ms) { lt[k] = n; log(m); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const retryDelayMs = (attempt, base = 5000, cap = 60000) => Math.min(cap, base * (2 ** Math.max(0, attempt - 1))) + Math.floor(Math.random() * 1500);
 const stats = {
   felled: 0,
   wood: 0,
@@ -65,8 +66,10 @@ async function connectWithRetry() {
     } catch (e) {
       if (isWalletBannedError(e)) throw e;
       saveState({ phase: 'reconnect', queueAhead: null });
-      log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 50)} — retry 15s`);
-      await sleep(15000);
+      const waitMs = retryDelayMs(attempt);
+      saveState({ phase: 'reconnect_wait', queueAhead: null });
+      log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 50)} — retry ${Math.ceil(waitMs / 1000)}s`);
+      await sleep(waitMs);
     }
   }
 }

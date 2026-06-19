@@ -20,6 +20,7 @@ const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] $
 const _thr = {};
 const logThrottle = (key, msg, everyMs = 30000) => { const now = Date.now(); if (!_thr[key] || now - _thr[key] > everyMs) { _thr[key] = now; log(msg); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const retryDelayMs = (attempt, base = 5000, cap = 60000) => Math.min(cap, base * (2 ** Math.max(0, attempt - 1))) + Math.floor(Math.random() * 1500);
 const PORTAL = { x: 61 - 30.5, z: 31 - 30.5 }; // mainland east -> pond
 
 let cli, auth;
@@ -48,8 +49,12 @@ async function connectWithRetry() {
       return p;
     } catch (e) {
       if (isWalletBannedError(e)) throw e;
-      log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 60)} — retry 15s`);
-      await sleep(15000);
+      const waitMs = retryDelayMs(attempt);
+      log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 60)} — retry ${Math.ceil(waitMs / 1000)}s`);
+      stats.phase = 'reconnect_wait';
+      stats.queueAhead = null;
+      saveState();
+      await sleep(waitMs);
       if (attempt % 3 === 0) { try { await freshAuth(); log('re-auth cookie'); } catch {} }
     }
   }
