@@ -21,6 +21,8 @@ const _thr = {};
 const logThrottle = (key, msg, everyMs = 30000) => { const now = Date.now(); if (!_thr[key] || now - _thr[key] > everyMs) { _thr[key] = now; log(msg); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const retryDelayMs = (attempt, base = 5000, cap = 60000) => Math.min(cap, base * (2 ** Math.max(0, attempt - 1))) + Math.floor(Math.random() * 1500);
+const TRANSIENT_FAILOVER_AFTER = 5;
+const isTransientGatewayErr = (msg) => /503|Unexpected token '<'|<!doctype|Non-JSON|presence ws err/i.test(String(msg || ''));
 const PORTAL = { x: 61 - 30.5, z: 31 - 30.5 }; // mainland east -> pond
 
 let cli, auth;
@@ -29,6 +31,7 @@ const stats = { fish: 0, casts: 0, ok: 0, cooked: 0, sold: 0, rate: 0, reconnect
 async function freshAuth() { const r = await KintaraClient.create(); cli = r.client; auth = { cookie: cli.cookie, player: r.player }; return auth; }
 
 async function connectWithRetry() {
+  let transientGatewayFails = 0;
   for (let attempt = 1; ; attempt++) {
     try {
       const p = new Presence(SHARD);
@@ -41,6 +44,7 @@ async function connectWithRetry() {
         if (d.ahead % 5 === 0) log('queue ahead=' + d.ahead);
       });
       await p.connect();
+      transientGatewayFails = 0;
       stats.phase = 'presence';
       stats.queueAhead = null;
       stats.region = p.region;
@@ -49,6 +53,15 @@ async function connectWithRetry() {
       return p;
     } catch (e) {
       if (isWalletBannedError(e)) throw e;
+      if (isTransientGatewayErr(e.message)) transientGatewayFails++;
+      else transientGatewayFails = 0;
+      if (transientGatewayFails >= TRANSIENT_FAILOVER_AFTER) {
+        stats.phase = 'failover_restart';
+        stats.queueAhead = null;
+        saveState();
+        log(`♻️ shard failover after ${transientGatewayFails} transient gateway errors`);
+        throw new Error('transient_presence_failover');
+      }
       const waitMs = retryDelayMs(attempt);
       log(`connect attempt ${attempt} gagal: ${e.message.slice(0, 60)} — retry ${Math.ceil(waitMs / 1000)}s`);
       stats.phase = 'reconnect_wait';

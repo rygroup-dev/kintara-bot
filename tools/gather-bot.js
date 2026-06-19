@@ -21,6 +21,8 @@ const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] $
 const lt = {}; const logT = (k, m, ms = 30000) => { const n = Date.now(); if (!lt[k] || n - lt[k] > ms) { lt[k] = n; log(m); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const retryDelayMs = (attempt, base = 5000, cap = 60000) => Math.min(cap, base * (2 ** Math.max(0, attempt - 1))) + Math.floor(Math.random() * 1500);
+const TRANSIENT_FAILOVER_AFTER = 5;
+const isTransientGatewayErr = (msg) => /503|Unexpected token '<'|<!doctype|Non-JSON|presence ws err/i.test(String(msg || ''));
 const stats = {
   felled: 0,
   wood: 0,
@@ -52,6 +54,7 @@ function saveState(extra = {}) {
 
 let cli;
 async function connectWithRetry() {
+  let transientGatewayFails = 0;
   for (let attempt = 1; ; attempt++) {
     try {
       const p = new Presence(SHARD);
@@ -61,11 +64,19 @@ async function connectWithRetry() {
         saveState({ phase: 'queue', queueAhead: Number.isFinite(Number(d?.ahead)) ? Number(d.ahead) : null, region: p.region });
       });
       await p.connect();
+      transientGatewayFails = 0;
       log('✅ presence live region=' + p.region);
       saveState({ phase: 'presence', queueAhead: null, region: p.region });
       return p;
     } catch (e) {
       if (isWalletBannedError(e)) throw e;
+      if (isTransientGatewayErr(e.message)) transientGatewayFails++;
+      else transientGatewayFails = 0;
+      if (transientGatewayFails >= TRANSIENT_FAILOVER_AFTER) {
+        saveState({ phase: 'failover_restart', queueAhead: null });
+        log(`♻️ shard failover after ${transientGatewayFails} transient gateway errors`);
+        throw new Error('transient_presence_failover');
+      }
       saveState({ phase: 'reconnect', queueAhead: null });
       const waitMs = retryDelayMs(attempt);
       saveState({ phase: 'reconnect_wait', queueAhead: null });
